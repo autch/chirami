@@ -87,6 +87,7 @@ private:
 
     void NavigateBy(int delta);
     ptrdiff_t FindFolderIndex(const std::filesystem::path& path) const;
+    void ToggleFullscreen();
 
     ViewLayout ComputeLayout();
     void UpdateScrollBars();
@@ -94,7 +95,7 @@ private:
     void UpdateView();
     void ApplyZoom(float newScale, CPoint anchor);
     void StepZoom(int direction, CPoint anchor);
-    void ToggleActualSize();
+    void SetZoomMode(ZoomMode mode);
     void OnScroll(int bar, int code);
 
     float DpiScale() const { return static_cast<float>(m_dpi) / 96.0f; }
@@ -147,4 +148,8 @@ private:
     // physical pixel at 100%; DPI only scales our own UI (text, scroll
     // steps), never the image.
     UINT m_dpi = USER_DEFAULT_SCREEN_DPI;
+
+    // Fullscreen (Phase 1 step 7)
+    bool m_fullscreen = false;
+    WINDOWPLACEMENT m_restorePlacement{};  // window state before fullscreen
 };

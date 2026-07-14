@@ -187,11 +187,50 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
         break;
     case '1':
     case VK_NUMPAD1:
-        ToggleActualSize();
+        SetZoomMode(ZoomMode::ActualSize);
+        break;
+    case '0':
+    case VK_NUMPAD0:
+        SetZoomMode(ZoomMode::Fit);
+        break;
+    case VK_F11:
+        ToggleFullscreen();
+        break;
+    case VK_ESCAPE:
+        if (m_fullscreen)
+        {
+            ToggleFullscreen();
+        }
         break;
     default:
         break;
     }
+}
+
+void MainWindow::ToggleFullscreen()
+{
+    if (!m_fullscreen)
+    {
+        m_restorePlacement.length = sizeof(m_restorePlacement);
+        GetWindowPlacement(&m_restorePlacement);
+        m_fullscreen = true;
+
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        GetMonitorInfoW(MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST), &monitor);
+        ModifyStyle(WS_OVERLAPPEDWINDOW, 0);
+        SetWindowPos(HWND_TOP, &monitor.rcMonitor, SWP_FRAMECHANGED);
+    }
+    else
+    {
+        m_fullscreen = false;
+        ModifyStyle(0, WS_OVERLAPPEDWINDOW);
+        SetWindowPlacement(&m_restorePlacement);  // restores maximized state too
+        SetWindowPos(nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    }
+    UpdateScrollBars();
+    Invalidate(FALSE);
 }
 
 MainWindow::ViewLayout MainWindow::ComputeLayout()
@@ -258,7 +297,8 @@ void MainWindow::UpdateScrollBars()
     float displayHeight = 0.0f;
 
     // Fit mode never overflows the client area, so bars stay hidden.
-    if (m_cpuImage && m_zoomMode != ZoomMode::Fit)
+    // Fullscreen suppresses them entirely; drag/wheel panning still works.
+    if (m_cpuImage && m_zoomMode != ZoomMode::Fit && !m_fullscreen)
     {
         const float scale = m_zoomMode == ZoomMode::ActualSize ? 1.0f : m_zoomScale;
         displayWidth = static_cast<float>(m_cpuImage.width) * scale;
@@ -373,16 +413,16 @@ void MainWindow::StepZoom(int direction, CPoint anchor)
     ApplyZoom(direction > 0 ? layout.scale * kZoomStep : layout.scale / kZoomStep, anchor);
 }
 
-void MainWindow::ToggleActualSize()
+void MainWindow::SetZoomMode(ZoomMode mode)
 {
-    if (!m_cpuImage)
+    if (!m_cpuImage || m_zoomMode == mode)
     {
         return;
     }
-    m_zoomMode = m_zoomMode == ZoomMode::ActualSize ? ZoomMode::Fit : ZoomMode::ActualSize;
+    m_zoomMode = mode;
     UpdateScrollBars();
 
-    // Start centered when entering actual size.
+    // Start centered when the new mode overflows the client area.
     const ViewLayout layout = ComputeLayout();
     m_panX = layout.maxPanX / 2.0f;
     m_panY = layout.maxPanY / 2.0f;
