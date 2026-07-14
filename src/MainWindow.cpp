@@ -1,7 +1,8 @@
 #include "MainWindow.h"
 #include "resource.h"
 
-#include <shellapi.h>  // DragAcceptFiles, DragQueryFileW
+#include <shellapi.h>   // DragAcceptFiles, DragQueryFileW
+#include <shobjidl.h>   // IFileOpenDialog
 
 #include <algorithm>
 #include <cmath>
@@ -51,6 +52,10 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
 
     m_loader = std::make_unique<ImageLoader>(m_hWnd, WM_APP_IMAGE_LOADED);
     m_scanner = std::make_unique<FolderScanner>(m_hWnd, WM_APP_FOLDER_SCANNED);
+
+    // Picks the resource language set up by SetThreadUILanguage.
+    m_menu = CMenuHandle(LoadMenuW(_Module.GetResourceInstance(), MAKEINTRESOURCEW(IDR_MAINMENU)));
+    SetMenu(m_menu);
 
     DragAcceptFiles(TRUE);
     return 0;
@@ -165,10 +170,6 @@ ptrdiff_t MainWindow::FindFolderIndex(const std::filesystem::path& path) const
 
 void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
 {
-    CRect rc;
-    GetClientRect(&rc);
-    const CPoint center(rc.Width() / 2, rc.Height() / 2);
-
     switch (key)
     {
     case VK_LEFT:
@@ -179,11 +180,11 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
         break;
     case VK_OEM_PLUS:
     case VK_ADD:
-        StepZoom(+1, center);
+        StepZoomAtCenter(+1);
         break;
     case VK_OEM_MINUS:
     case VK_SUBTRACT:
-        StepZoom(-1, center);
+        StepZoomAtCenter(-1);
         break;
     case '1':
     case VK_NUMPAD1:
@@ -192,6 +193,12 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
     case '0':
     case VK_NUMPAD0:
         SetZoomMode(ZoomMode::Fit);
+        break;
+    case 'O':
+        if (GetKeyState(VK_CONTROL) & 0x8000)
+        {
+            ShowFileOpenDialog();
+        }
         break;
     case VK_F11:
         ToggleFullscreen();
@@ -205,6 +212,116 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
     default:
         break;
     }
+}
+
+void MainWindow::StepZoomAtCenter(int direction)
+{
+    CRect rc;
+    GetClientRect(&rc);
+    StepZoom(direction, CPoint(rc.Width() / 2, rc.Height() / 2));
+}
+
+void MainWindow::OnInitMenuPopup(CMenuHandle menu, UINT /*index*/, BOOL sysMenu)
+{
+    if (sysMenu || menu.IsNull())
+    {
+        return;
+    }
+    // No-ops for popups that don't contain these ids (File, Help).
+    const bool fit = m_zoomMode == ZoomMode::Fit;
+    const bool actual = m_zoomMode == ZoomMode::ActualSize;
+    menu.CheckMenuItem(IDM_VIEW_FIT, MF_BYCOMMAND | (fit ? MF_CHECKED : MF_UNCHECKED));
+    menu.CheckMenuItem(IDM_VIEW_ACTUAL, MF_BYCOMMAND | (actual ? MF_CHECKED : MF_UNCHECKED));
+    menu.CheckMenuItem(IDM_VIEW_FULLSCREEN,
+                       MF_BYCOMMAND | (m_fullscreen ? MF_CHECKED : MF_UNCHECKED));
+}
+
+void MainWindow::ShowFileOpenDialog()
+try
+{
+    auto dialog = wil::CoCreateInstance<IFileOpenDialog>(CLSID_FileOpenDialog);
+
+    const std::wstring imagesName = LoadStringResource(IDS_FILTER_IMAGES);
+    const std::wstring allName = LoadStringResource(IDS_FILTER_ALL);
+    const COMDLG_FILTERSPEC filters[] = {
+        // Browsing filter only; anything WIC can decode still loads (e.g.
+        // via "All files"), so this static list doesn't need to be complete.
+        {imagesName.c_str(),
+         L"*.jpg;*.jpeg;*.jfif;*.png;*.bmp;*.gif;*.tif;*.tiff;*.ico;*.webp;*.avif"},
+        {allName.c_str(), L"*.*"},
+    };
+    THROW_IF_FAILED(dialog->SetFileTypes(ARRAYSIZE(filters), filters));
+
+    const HRESULT hr = dialog->Show(m_hWnd);
+    if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+    {
+        return;
+    }
+    THROW_IF_FAILED(hr);
+
+    wil::com_ptr<IShellItem> item;
+    THROW_IF_FAILED(dialog->GetResult(item.put()));
+    wil::unique_cotaskmem_string path;
+    THROW_IF_FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, path.put()));
+    LoadFile(path.get());
+}
+CATCH_LOG()
+
+void MainWindow::ShowAboutBox()
+{
+    const std::wstring version = CHIRAMI_VERSION;
+    const std::wstring text =
+        std::vformat(LoadStringResource(IDS_ABOUT_TEXT), std::make_wformat_args(version));
+    MessageBoxW(text.c_str(), LoadStringResource(IDS_ABOUT_TITLE).c_str(),
+                MB_OK | MB_ICONINFORMATION);
+}
+
+LRESULT MainWindow::OnFileOpen(WORD, WORD, HWND, BOOL&)
+{
+    ShowFileOpenDialog();
+    return 0;
+}
+
+LRESULT MainWindow::OnFileExit(WORD, WORD, HWND, BOOL&)
+{
+    PostMessageW(WM_CLOSE);
+    return 0;
+}
+
+LRESULT MainWindow::OnViewFit(WORD, WORD, HWND, BOOL&)
+{
+    SetZoomMode(ZoomMode::Fit);
+    return 0;
+}
+
+LRESULT MainWindow::OnViewActual(WORD, WORD, HWND, BOOL&)
+{
+    SetZoomMode(ZoomMode::ActualSize);
+    return 0;
+}
+
+LRESULT MainWindow::OnViewZoomIn(WORD, WORD, HWND, BOOL&)
+{
+    StepZoomAtCenter(+1);
+    return 0;
+}
+
+LRESULT MainWindow::OnViewZoomOut(WORD, WORD, HWND, BOOL&)
+{
+    StepZoomAtCenter(-1);
+    return 0;
+}
+
+LRESULT MainWindow::OnViewFullscreen(WORD, WORD, HWND, BOOL&)
+{
+    ToggleFullscreen();
+    return 0;
+}
+
+LRESULT MainWindow::OnHelpAbout(WORD, WORD, HWND, BOOL&)
+{
+    ShowAboutBox();
+    return 0;
 }
 
 // Re-evaluates the zoom (and the window size) whenever a new image arrives:
@@ -245,12 +362,12 @@ void MainWindow::ApplyAutoZoomForNewImage()
     const int workWidth = work.right - work.left;
     const int workHeight = work.bottom - work.top;
 
-    // Chrome: borders and caption (and the menu bar once Phase 2 adds one;
-    // switch bMenu to TRUE then). Scrollbars are excluded on purpose - the
-    // window is sized so that none are needed.
+    // Chrome: borders, caption, and the menu bar (assumed single-row).
+    // Scrollbars are excluded on purpose - the window is sized so that none
+    // are needed.
     RECT frame{};
-    AdjustWindowRectExForDpi(&frame, GetStyle() & ~(WS_HSCROLL | WS_VSCROLL), FALSE,
-                             GetExStyle(), m_dpi);
+    AdjustWindowRectExForDpi(&frame, GetStyle() & ~(WS_HSCROLL | WS_VSCROLL),
+                             GetMenu() != nullptr, GetExStyle(), m_dpi);
     const int chromeWidth = frame.right - frame.left;
     const int chromeHeight = frame.bottom - frame.top;
 
@@ -307,12 +424,14 @@ void MainWindow::ToggleFullscreen()
         MONITORINFO monitor{};
         monitor.cbSize = sizeof(monitor);
         GetMonitorInfoW(MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST), &monitor);
+        SetMenu(nullptr);  // m_menu keeps the handle for restoration
         ModifyStyle(WS_OVERLAPPEDWINDOW, 0);
         SetWindowPos(HWND_TOP, &monitor.rcMonitor, SWP_FRAMECHANGED);
     }
     else
     {
         m_fullscreen = false;
+        SetMenu(m_menu);
         ModifyStyle(0, WS_OVERLAPPEDWINDOW);
         SetWindowPlacement(&m_restorePlacement);  // restores maximized state too
         SetWindowPos(nullptr, 0, 0, 0, 0,
@@ -719,6 +838,12 @@ void MainWindow::OnDestroy()
     // Stop and join the workers before the window goes away.
     m_loader.reset();
     m_scanner.reset();
+    // A menu attached to the window is destroyed with it; while fullscreen
+    // it is detached and must be destroyed explicitly.
+    if (m_fullscreen && !m_menu.IsNull())
+    {
+        m_menu.DestroyMenu();
+    }
     DiscardDeviceResources();
     PostQuitMessage(0);
 }

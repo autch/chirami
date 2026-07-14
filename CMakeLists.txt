@@ -28,6 +28,7 @@ target_include_directories(chirami PRIVATE "${WTL_INCLUDE_DIR}")
 target_compile_definitions(chirami PRIVATE
     UNICODE
     _UNICODE
+    "CHIRAMI_VERSION=L\"${PROJECT_VERSION}\""
 )
 
 target_link_libraries(chirami PRIVATE

@@ -11,6 +11,34 @@ BEGIN
     IDS_ERR_FILE_OPEN        L"ファイルを開けません"
     IDS_ERR_DECODE           L"画像をデコードできません"
     IDS_ERR_IMAGE_TOO_LARGE  L"画像が大きすぎます"
+    IDS_ABOUT_TITLE          L"バージョン情報"
+    IDS_ABOUT_TEXT           L"chirami {}\n高速・軽量な画像ビューア\nMIT License"
+    IDS_FILTER_IMAGES        L"画像ファイル"
+    IDS_FILTER_ALL           L"すべてのファイル"
+END
+
+IDR_MAINMENU MENU
+BEGIN
+    POPUP "ファイル(&F)"
+    BEGIN
+        MENUITEM "開く(&O)...\tCtrl+O",        IDM_FILE_OPEN
+        MENUITEM SEPARATOR
+        MENUITEM "終了(&X)",                   IDM_FILE_EXIT
+    END
+    POPUP "表示(&V)"
+    BEGIN
+        MENUITEM "フィット表示(&F)\t0",        IDM_VIEW_FIT
+        MENUITEM "等倍表示(&A)\t1",            IDM_VIEW_ACTUAL
+        MENUITEM SEPARATOR
+        MENUITEM "拡大(&I)\t+",                IDM_VIEW_ZOOMIN
+        MENUITEM "縮小(&O)\t-",                IDM_VIEW_ZOOMOUT
+        MENUITEM SEPARATOR
+        MENUITEM "フルスクリーン(&U)\tF11",    IDM_VIEW_FULLSCREEN
+    END
+    POPUP "ヘルプ(&H)"
+    BEGIN
+        MENUITEM "バージョン情報(&A)...",      IDM_HELP_ABOUT
+    END
 END
 
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
@@ -21,6 +49,34 @@ BEGIN
     IDS_ERR_FILE_OPEN        L"Cannot open file"
     IDS_ERR_DECODE           L"Cannot decode image"
     IDS_ERR_IMAGE_TOO_LARGE  L"Image is too large"
+    IDS_ABOUT_TITLE          L"About"
+    IDS_ABOUT_TEXT           L"chirami {}\nA fast and lightweight image viewer\nMIT License"
+    IDS_FILTER_IMAGES        L"Image files"
+    IDS_FILTER_ALL           L"All files"
+END
+
+IDR_MAINMENU MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Open...\tCtrl+O",           IDM_FILE_OPEN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                      IDM_FILE_EXIT
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Fit to Window\t0",          IDM_VIEW_FIT
+        MENUITEM "&Actual Size\t1",            IDM_VIEW_ACTUAL
+        MENUITEM SEPARATOR
+        MENUITEM "Zoom &In\t+",                IDM_VIEW_ZOOMIN
+        MENUITEM "Zoom &Out\t-",               IDM_VIEW_ZOOMOUT
+        MENUITEM SEPARATOR
+        MENUITEM "F&ullscreen\tF11",           IDM_VIEW_FULLSCREEN
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About...",                  IDM_HELP_ABOUT
+    END
 END
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL

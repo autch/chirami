@@ -4,6 +4,7 @@
 #include "FolderScanner.h"
 #include "ImageLoader.h"
 #include "LoadedImage.h"
+#include "resource.h"
 
 #include <filesystem>
 #include <memory>
@@ -31,10 +32,19 @@ public:
         MSG_WM_HSCROLL(OnHScroll)
         MSG_WM_VSCROLL(OnVScroll)
         MSG_WM_DROPFILES(OnDropFiles)
+        MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
         MSG_WM_DESTROY(OnDestroy)
         MESSAGE_HANDLER(WM_DPICHANGED, OnDpiChanged)
         MESSAGE_HANDLER(WM_APP_IMAGE_LOADED, OnImageLoaded)
         MESSAGE_HANDLER(WM_APP_FOLDER_SCANNED, OnFolderScanned)
+        COMMAND_ID_HANDLER(IDM_FILE_OPEN, OnFileOpen)
+        COMMAND_ID_HANDLER(IDM_FILE_EXIT, OnFileExit)
+        COMMAND_ID_HANDLER(IDM_VIEW_FIT, OnViewFit)
+        COMMAND_ID_HANDLER(IDM_VIEW_ACTUAL, OnViewActual)
+        COMMAND_ID_HANDLER(IDM_VIEW_ZOOMIN, OnViewZoomIn)
+        COMMAND_ID_HANDLER(IDM_VIEW_ZOOMOUT, OnViewZoomOut)
+        COMMAND_ID_HANDLER(IDM_VIEW_FULLSCREEN, OnViewFullscreen)
+        COMMAND_ID_HANDLER(IDM_HELP_ABOUT, OnHelpAbout)
     END_MSG_MAP()
 
     void LoadFile(std::filesystem::path path);
@@ -80,7 +90,16 @@ private:
     void OnHScroll(int code, short pos, HWND scrollBar);
     void OnVScroll(int code, short pos, HWND scrollBar);
     void OnDropFiles(HDROP drop);
+    void OnInitMenuPopup(CMenuHandle menu, UINT index, BOOL sysMenu);
     void OnDestroy();
+    LRESULT OnFileOpen(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnFileExit(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnViewFit(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnViewActual(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnViewZoomIn(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnViewZoomOut(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnViewFullscreen(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnHelpAbout(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnDpiChanged(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnImageLoaded(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnFolderScanned(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
@@ -153,4 +172,11 @@ private:
     // Fullscreen (Phase 1 step 7)
     bool m_fullscreen = false;
     WINDOWPLACEMENT m_restorePlacement{};  // window state before fullscreen
+
+    // Menu bar (Phase 2 step 8). Kept here while detached in fullscreen.
+    CMenuHandle m_menu;
+
+    void ShowFileOpenDialog();
+    void ShowAboutBox();
+    void StepZoomAtCenter(int direction);
 };

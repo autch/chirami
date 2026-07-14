@@ -13,6 +13,7 @@ extern CAppModule _Module;
 
 #include <atlwin.h>
 #include <atlgdi.h>
+#include <atluser.h>
 #include <atlcrack.h>
 
 #include <d2d1.h>
