@@ -126,6 +126,7 @@ private:
 
     void NavigateBy(int delta);
     ptrdiff_t FindFolderIndex(const std::filesystem::path& path) const;
+    void OpenFolder(std::filesystem::path folder);
     void ToggleFullscreen();
     void ApplyAutoZoomForNewImage();
 
@@ -173,6 +174,7 @@ private:
     ptrdiff_t m_currentIndex = -1;                     // -1: unknown / not in list
     uint64_t m_expectedScanGeneration = 0;
     bool m_edgeWarned = false;  // beeped at the list edge; next attempt wraps
+    bool m_openFirstAfterScan = false;  // folder was opened; show its first image
 
     // View transform (Phase 1 steps 5/6). Pan is the top-left of the
     // viewport within the scaled image, in pixels (1 DIP == 1 pixel).

@@ -186,6 +186,12 @@ std::vector<std::filesystem::path> FolderScanner::ScanFolder(const std::filesyst
         {
             continue;
         }
+        // Skip hidden files, matching what Explorer shows by default.
+        const DWORD attributes = GetFileAttributesW(it->path().c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_HIDDEN))
+        {
+            continue;
+        }
         Entry entry;
         entry.path = it->path();
         entry.modified = it->last_write_time(entryEc);

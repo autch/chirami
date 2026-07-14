@@ -15,6 +15,7 @@
 #define IDS_FILTER_JPEG         112
 #define IDS_FILTER_BMP          113
 #define IDS_FILTER_TIFF         114
+#define IDS_ERR_NO_IMAGES       115
 
 #define IDR_MAINMENU            200
 

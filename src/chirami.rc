@@ -21,6 +21,7 @@ BEGIN
     IDS_FILTER_JPEG          L"JPEG 画像"
     IDS_FILTER_BMP           L"BMP 画像"
     IDS_FILTER_TIFF          L"TIFF 画像"
+    IDS_ERR_NO_IMAGES        L"表示できる画像がありません"
 END
 
 IDR_MAINMENU MENU
@@ -85,6 +86,7 @@ BEGIN
     IDS_FILTER_JPEG          L"JPEG image"
     IDS_FILTER_BMP           L"BMP image"
     IDS_FILTER_TIFF          L"TIFF image"
+    IDS_ERR_NO_IMAGES        L"No displayable images in this folder"
 END
 
 IDR_MAINMENU MENU

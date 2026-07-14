@@ -130,8 +130,19 @@ void MainWindow::LoadFile(std::filesystem::path path)
         path = std::move(absolute);
     }
 
+    // A dropped or association-launched folder shows its first image. The
+    // attribute query is the one synchronous touch of the path on the UI
+    // thread; everything after goes through the workers.
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
+    {
+        OpenFolder(std::move(path));
+        return;
+    }
+
     m_currentPath = std::move(path);
     m_edgeWarned = false;
+    m_openFirstAfterScan = false;  // an explicit file wins over a pending folder open
 
     if (auto folder = m_currentPath.parent_path(); folder != m_currentFolder)
     {
@@ -155,6 +166,23 @@ void MainWindow::LoadFile(std::filesystem::path path)
         return;
     }
     m_expectedGeneration = m_loader->RequestLoad(m_currentPath);
+    m_state = ViewState::Loading;
+    m_statusText = LoadStringResource(IDS_STATUS_LOADING);
+    Invalidate(FALSE);
+}
+
+void MainWindow::OpenFolder(std::filesystem::path folder)
+{
+    m_currentPath.clear();
+    m_currentFolder = std::move(folder);
+    m_folderFiles.clear();
+    m_currentIndex = -1;
+    m_prefetchFailed.clear();
+    m_edgeWarned = false;
+    m_openFirstAfterScan = true;
+    m_expectedScanGeneration = m_scanner->RequestScan(m_currentFolder, CurrentSortSpec());
+
+    // The scan may take a moment on network folders; say so.
     m_state = ViewState::Loading;
     m_statusText = LoadStringResource(IDS_STATUS_LOADING);
     Invalidate(FALSE);
@@ -1218,6 +1246,23 @@ LRESULT MainWindow::OnFolderScanned(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lP
     }
     m_folderFiles = std::move(result->files);
     m_currentIndex = FindFolderIndex(m_currentPath);
+
+    if (m_openFirstAfterScan)
+    {
+        m_openFirstAfterScan = false;
+        if (!m_folderFiles.empty())
+        {
+            LoadFile(m_folderFiles.front());
+        }
+        else
+        {
+            m_state = ViewState::Error;
+            m_statusText = LoadStringResource(IDS_ERR_NO_IMAGES);
+            Invalidate(FALSE);
+        }
+        return 0;
+    }
+
     TriggerPrefetch();
     return 0;
 }
