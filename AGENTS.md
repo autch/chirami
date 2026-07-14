@@ -28,7 +28,7 @@ MIT License を採用する。
 - ビルドシステム: CMake + vcpkg
 - UI フレームワーク: WTL (Windows Template Library)
 - ユーティリティ: WIL (Windows Implementation Libraries)
-- CRT: Universal CRT (uCRT)
+- CRT: Universal CRT (uCRT)。静的リンク（/MT）で exe に含める。VC++ 再頒布可能パッケージなしで ZIP 展開のみで動作させるための決定（トリプレットは x64-windows-static）
 
 ## アーキテクチャ方針
 
@@ -144,6 +144,13 @@ Direct3D 12 はこの用途ではオーバーキル。使わない。
 - インストーラーは任意だが、user インストール（管理者権限不要）に対応すること
 - シングルバイナリでなくてもよい（DLL 同梱可）
 
+## CI
+
+GitHub Actions（`.github/workflows/build.yml`）が main への push / PR ごとに release ビルドを行い、`chirami-win64` アーティファクト（chirami.exe + README.md）を生成する。
+
+- ランナーは windows-latest（VS 2026）。MSVC 環境は vswhere で最新 VS を検出して vcvars64 を呼ぶ（サードパーティのセットアップアクションは使わない）
+- ランナーの vcpkg は shallow clone のため、vcpkg.json の builtin-baseline コミットを configure 前に `git fetch --depth 1` する必要がある（ワークフロー内で対応済み）
+
 ## 設定の保存先
 
 - 設定ファイル: `%APPDATA%` 以下（ローミングプロファイルで同期される。これは意図通り）
@@ -161,7 +168,7 @@ Direct3D 12 はこの用途ではオーバーキル。使わない。
 
 ## 実装の進め方
 
-### Phase 1: 最小限のビューア
+### Phase 1: 最小限のビューア（完了）
 1. CMake + vcpkg + WTL でプロジェクトスケルトン作成
 2. WIC で画像をデコードし、Direct2D (HwndRenderTarget) でウィンドウに表示
 3. ←→キーで同一フォルダ内の画像切り替え（並び順はファイル名の自然順で固定。比較関数は Phase 2 での設定化を見込んで差し替え可能な構造にする）
