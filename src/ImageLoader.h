@@ -40,6 +40,10 @@ public:
     // wins). Returns the generation id to match against Result::generation.
     uint64_t RequestLoad(std::filesystem::path path);
 
+    // Decodes an in-memory blob (e.g. clipboard data) instead of a file.
+    // displayName is reported back as Result::path for the title bar.
+    uint64_t RequestLoadFromMemory(std::vector<uint8_t> data, std::filesystem::path displayName);
+
     // Takes the most recent completed result, emptying the mailbox.
     std::optional<Result> TakeResult();
 
@@ -48,11 +52,12 @@ private:
     {
         uint64_t generation = 0;
         std::filesystem::path path;
+        std::vector<uint8_t> data;  // non-empty: decode this instead of path
     };
 
     void WorkerProc(std::stop_token stopToken) noexcept;
-    HRESULT DecodeFile(IWICImagingFactory* factory, const std::filesystem::path& path,
-                       const std::stop_token& stopToken, LoadedImage& out) noexcept;
+    HRESULT Decode(IWICImagingFactory* factory, Request& request,
+                   const std::stop_token& stopToken, LoadedImage& out) noexcept;
     bool ShouldAbort(const std::stop_token& stopToken);
 
     HWND m_notifyWindow;

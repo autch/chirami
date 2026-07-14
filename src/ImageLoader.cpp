@@ -35,6 +35,19 @@ uint64_t ImageLoader::RequestLoad(std::filesystem::path path)
     return generation;
 }
 
+uint64_t ImageLoader::RequestLoadFromMemory(std::vector<uint8_t> data,
+                                            std::filesystem::path displayName)
+{
+    uint64_t generation;
+    {
+        std::lock_guard lock(m_mutex);
+        generation = m_nextGeneration++;
+        m_pending = Request{generation, std::move(displayName), std::move(data)};
+    }
+    m_cv.notify_one();
+    return generation;
+}
+
 std::optional<ImageLoader::Result> ImageLoader::TakeResult()
 {
     std::lock_guard lock(m_mutex);
@@ -76,8 +89,8 @@ try
 
         Result result;
         result.generation = request.generation;
-        result.path = std::move(request.path);
-        result.hr = DecodeFile(factory.get(), result.path, stopToken, result.image);
+        result.path = request.path;
+        result.hr = Decode(factory.get(), request, stopToken, result.image);
 
         if (stopToken.stop_requested())
         {
@@ -104,42 +117,46 @@ catch (...)
     LOG_CAUGHT_EXCEPTION();
 }
 
-HRESULT ImageLoader::DecodeFile(IWICImagingFactory* factory, const std::filesystem::path& path,
-                                const std::stop_token& stopToken, LoadedImage& out) noexcept
+HRESULT ImageLoader::Decode(IWICImagingFactory* factory, Request& request,
+                            const std::stop_token& stopToken, LoadedImage& out) noexcept
 try
 {
-    // Read the file ourselves in chunks instead of letting WIC do the I/O:
-    // WIC's file access has no cancellation point, while this loop can bail
-    // out between chunks when a OneDrive hydration or SMB read is slow.
-    // Known limit: a single ReadFile against a fully unresponsive share can
-    // still block until the redirector times out (CancelSynchronousIo could
-    // lift this later).
-    wil::unique_hfile file(CreateFileW(path.c_str(), GENERIC_READ,
-                                       FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
-                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-    RETURN_LAST_ERROR_IF(!file);
-
-    LARGE_INTEGER fileSize{};
-    RETURN_IF_WIN32_BOOL_FALSE(GetFileSizeEx(file.get(), &fileSize));
-    RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE),
-                 static_cast<uint64_t>(fileSize.QuadPart) > UINT_MAX);
-
-    std::vector<uint8_t> data(static_cast<size_t>(fileSize.QuadPart));
-    size_t offset = 0;
-    while (offset < data.size())
+    std::vector<uint8_t> data = std::move(request.data);
+    if (data.empty())
     {
-        if (ShouldAbort(stopToken))
+        // Read the file ourselves in chunks instead of letting WIC do the
+        // I/O: WIC's file access has no cancellation point, while this loop
+        // can bail out between chunks when a OneDrive hydration or SMB read
+        // is slow. Known limit: a single ReadFile against a fully
+        // unresponsive share can still block until the redirector times out
+        // (CancelSynchronousIo could lift this later).
+        wil::unique_hfile file(CreateFileW(request.path.c_str(), GENERIC_READ,
+                                           FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+        RETURN_LAST_ERROR_IF(!file);
+
+        LARGE_INTEGER fileSize{};
+        RETURN_IF_WIN32_BOOL_FALSE(GetFileSizeEx(file.get(), &fileSize));
+        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE),
+                     static_cast<uint64_t>(fileSize.QuadPart) > UINT_MAX);
+
+        data.resize(static_cast<size_t>(fileSize.QuadPart));
+        size_t offset = 0;
+        while (offset < data.size())
         {
-            return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+            if (ShouldAbort(stopToken))
+            {
+                return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+            }
+            const DWORD toRead =
+                static_cast<DWORD>(std::min<size_t>(kReadChunkBytes, data.size() - offset));
+            DWORD read = 0;
+            RETURN_IF_WIN32_BOOL_FALSE(
+                ReadFile(file.get(), data.data() + offset, toRead, &read, nullptr));
+            RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_HANDLE_EOF), read == 0);
+            offset += read;
         }
-        const DWORD toRead =
-            static_cast<DWORD>(std::min<size_t>(kReadChunkBytes, data.size() - offset));
-        DWORD read = 0;
-        RETURN_IF_WIN32_BOOL_FALSE(ReadFile(file.get(), data.data() + offset, toRead, &read, nullptr));
-        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_HANDLE_EOF), read == 0);
-        offset += read;
     }
-    file.reset();
 
     wil::com_ptr<IStream> stream;
     stream.attach(SHCreateMemStream(data.data(), static_cast<UINT>(data.size())));

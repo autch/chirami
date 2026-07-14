@@ -19,7 +19,9 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 - Windows 標準の WIC コーデックでデコード（JPEG, PNG, BMP, GIF, TIFF, ICO, WebP, AVIF など。OS に入っているコーデックを自動検出） / Decodes through the OS-provided WIC codecs (JPEG, PNG, BMP, GIF, TIFF, ICO, WebP, AVIF, ...; installed codecs are detected automatically)
 - ファイル I/O とデコードは常にバックグラウンドで行い、UI は固まらない（遅い SMB / OneDrive でも操作可能） / File I/O and decoding always run in the background; the UI never freezes, even on slow SMB shares or OneDrive
 - フィット・等倍・自由ズーム、ドラッグでのパン、必要な軸のみのスクロールバー / Fit, actual-size, and free zoom with drag panning and per-axis scrollbars
-- 同一フォルダ内をエクスプローラーと同じ自然順で前後移動、ドラッグ＆ドロップで開く / Flips through the folder in Explorer-like natural order; open files by drag & drop
+- 同一フォルダ内を前後移動（並び順は名前/更新日時/サイズ・昇順/降順を選択可、既定はエクスプローラーと同じ自然順）、ドラッグ＆ドロップで開く / Flips through the folder (sort by name/date/size, ascending/descending; Explorer-like natural order by default); open files by drag & drop
+- フォーマットを変換して保存（PNG/JPEG/BMP/TIFF）、クリップボードからの貼り付け、90 度回転・反転 / Save as PNG/JPEG/BMP/TIFF, paste from the clipboard, rotate/flip
+- 設定は %APPDATA% の INI ファイルに保存（レジストリ不使用） / Settings live in an INI file under %APPDATA% (no registry)
 - 画像を開くたびにウィンドウサイズを画像に合わせて自動調整 / The window automatically resizes to wrap each image
 - フルスクリーン表示 / Fullscreen mode
 - Per-Monitor V2 の DPI 対応（等倍表示は表示スケール設定に依らず dot-by-dot） / Per-Monitor V2 DPI awareness (actual size is true dot-by-dot regardless of display scaling)
@@ -38,6 +40,11 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 | 左ドラッグ / left drag | パン（表示がウィンドウより大きいとき） / pan (when the image overflows the window) |
 | F11 | フルスクリーン切り替え / toggle fullscreen |
 | Esc | フルスクリーン解除 / leave fullscreen |
+| Ctrl + O | ファイルを開く / open a file |
+| Ctrl + S | 名前を付けて保存（形式変換） / save as (format conversion) |
+| Ctrl + V | クリップボードから貼り付け / paste from the clipboard |
+| R / L | 右へ / 左へ 90 度回転 / rotate right / left 90° |
+| H / V | 左右反転 / 上下反転 / flip horizontal / vertical |
 | ドラッグ＆ドロップ / drop a file | そのファイルを開く / open the dropped file |
 
 ## ビルド / Building

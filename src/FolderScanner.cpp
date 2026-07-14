@@ -80,13 +80,13 @@ FolderScanner::FolderScanner(HWND notifyWindow, UINT notifyMessage)
 {
 }
 
-uint64_t FolderScanner::RequestScan(std::filesystem::path folder)
+uint64_t FolderScanner::RequestScan(std::filesystem::path folder, SortSpec sort)
 {
     uint64_t generation;
     {
         std::lock_guard lock(m_mutex);
         generation = m_nextGeneration++;
-        m_pending = Request{generation, std::move(folder)};
+        m_pending = Request{generation, std::move(folder), sort};
     }
     m_cv.notify_one();
     return generation;
@@ -134,7 +134,7 @@ try
         Result result;
         result.generation = request.generation;
         result.folder = std::move(request.folder);
-        result.files = ScanFolder(result.folder, stopToken);
+        result.files = ScanFolder(result.folder, request.sort, stopToken);
 
         if (stopToken.stop_requested())
         {
@@ -156,11 +156,19 @@ catch (...)
 }
 
 std::vector<std::filesystem::path> FolderScanner::ScanFolder(const std::filesystem::path& folder,
+                                                             const SortSpec& sort,
                                                              const std::stop_token& stopToken)
 {
     namespace fs = std::filesystem;
 
-    std::vector<fs::path> files;
+    struct Entry
+    {
+        fs::path path;
+        fs::file_time_type modified;
+        uintmax_t size = 0;
+    };
+
+    std::vector<Entry> entries;
     std::error_code ec;
     for (auto it = fs::directory_iterator(folder, fs::directory_options::skip_permission_denied, ec);
          !ec && it != fs::directory_iterator(); it.increment(ec))
@@ -169,22 +177,48 @@ std::vector<std::filesystem::path> FolderScanner::ScanFolder(const std::filesyst
         {
             return {};
         }
-        std::error_code typeEc;
-        if (!it->is_regular_file(typeEc))
+        std::error_code entryEc;
+        if (!it->is_regular_file(entryEc))
         {
             continue;
         }
-        if (m_extensions.contains(ToLower(it->path().extension().wstring())))
+        if (!m_extensions.contains(ToLower(it->path().extension().wstring())))
         {
-            files.push_back(it->path());
+            continue;
         }
+        Entry entry;
+        entry.path = it->path();
+        entry.modified = it->last_write_time(entryEc);
+        entry.size = it->file_size(entryEc);
+        entries.push_back(std::move(entry));
     }
 
-    // Natural filename order, matching Explorer ("img2" before "img10").
-    // Fixed for now; Phase 2 makes the comparator configurable
-    // (name/date/size, ascending/descending).
-    std::sort(files.begin(), files.end(), [](const fs::path& a, const fs::path& b) {
-        return StrCmpLogicalW(a.filename().c_str(), b.filename().c_str()) < 0;
+    // Names compare in natural order, matching Explorer ("img2" before
+    // "img10"); it is also the tie-breaker for the date and size keys.
+    const auto nameLess = [](const Entry& a, const Entry& b) {
+        return StrCmpLogicalW(a.path.filename().c_str(), b.path.filename().c_str()) < 0;
+    };
+    const auto ascendingLess = [&](const Entry& a, const Entry& b) {
+        switch (sort.key)
+        {
+        case SortKey::Date:
+            return a.modified != b.modified ? a.modified < b.modified : nameLess(a, b);
+        case SortKey::Size:
+            return a.size != b.size ? a.size < b.size : nameLess(a, b);
+        case SortKey::Name:
+        default:
+            return nameLess(a, b);
+        }
+    };
+    std::sort(entries.begin(), entries.end(), [&](const Entry& a, const Entry& b) {
+        return sort.descending ? ascendingLess(b, a) : ascendingLess(a, b);
     });
+
+    std::vector<fs::path> files;
+    files.reserve(entries.size());
+    for (auto& entry : entries)
+    {
+        files.push_back(std::move(entry.path));
+    }
     return files;
 }

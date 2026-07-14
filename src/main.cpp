@@ -1,14 +1,37 @@
 #include "framework.h"
 #include "MainWindow.h"
+#include "Settings.h"
 #include "resource.h"
 
 #include <shellapi.h>  // CommandLineToArgvW
 
 CAppModule _Module;
 
+namespace
+{
+
+void ApplyLanguage(const Settings& settings)
+{
+    if (settings.language == L"ja")
+    {
+        SetThreadUILanguage(MAKELANGID(LANG_JAPANESE, SUBLANG_DEFAULT));
+    }
+    else if (settings.language == L"en")
+    {
+        SetThreadUILanguage(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
+    }
+    else
+    {
+        SetThreadUILanguage(GetUserDefaultUILanguage());
+    }
+}
+
+}  // namespace
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR /*cmdLine*/, int cmdShow)
 {
-    SetThreadUILanguage(GetUserDefaultUILanguage());
+    Settings settings = Settings::Load();
+    ApplyLanguage(settings);
 
     auto coInit = wil::CoInitializeEx(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
@@ -23,6 +46,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR /*cmdLine*/, int cmdS
     LoadStringW(hInstance, IDS_APP_TITLE, title, ARRAYSIZE(title));
 
     MainWindow wnd;
+    wnd.InitSettings(std::move(settings));
     if (wnd.Create(nullptr, CWindow::rcDefault, title, WS_OVERLAPPEDWINDOW) == nullptr)
     {
         return 1;

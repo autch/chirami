@@ -3,7 +3,9 @@
 #include "framework.h"
 #include "FolderScanner.h"
 #include "ImageLoader.h"
+#include "ImageSaver.h"
 #include "LoadedImage.h"
+#include "Settings.h"
 #include "resource.h"
 
 #include <filesystem>
@@ -13,6 +15,7 @@
 
 inline constexpr UINT WM_APP_IMAGE_LOADED = WM_APP + 1;
 inline constexpr UINT WM_APP_FOLDER_SCANNED = WM_APP + 2;
+inline constexpr UINT WM_APP_SAVE_DONE = WM_APP + 3;
 
 class MainWindow : public CWindowImpl<MainWindow>
 {
@@ -37,8 +40,13 @@ public:
         MESSAGE_HANDLER(WM_DPICHANGED, OnDpiChanged)
         MESSAGE_HANDLER(WM_APP_IMAGE_LOADED, OnImageLoaded)
         MESSAGE_HANDLER(WM_APP_FOLDER_SCANNED, OnFolderScanned)
+        MESSAGE_HANDLER(WM_APP_SAVE_DONE, OnSaveDone)
         COMMAND_ID_HANDLER(IDM_FILE_OPEN, OnFileOpen)
+        COMMAND_ID_HANDLER(IDM_FILE_SAVEAS, OnFileSaveAs)
         COMMAND_ID_HANDLER(IDM_FILE_EXIT, OnFileExit)
+        COMMAND_ID_HANDLER(IDM_EDIT_PASTE, OnEditPaste)
+        COMMAND_RANGE_HANDLER(IDM_EDIT_ROTATE_CW, IDM_EDIT_FLIP_V, OnEditTransform)
+        COMMAND_RANGE_HANDLER(IDM_SORT_NAME, IDM_SORT_DESC, OnSortChanged)
         COMMAND_ID_HANDLER(IDM_VIEW_FIT, OnViewFit)
         COMMAND_ID_HANDLER(IDM_VIEW_ACTUAL, OnViewActual)
         COMMAND_ID_HANDLER(IDM_VIEW_ZOOMIN, OnViewZoomIn)
@@ -48,6 +56,9 @@ public:
     END_MSG_MAP()
 
     void LoadFile(std::filesystem::path path);
+
+    // Call before Create(); the language override is applied in wWinMain.
+    void InitSettings(Settings settings) { m_settings = std::move(settings); }
 
 private:
     enum class ViewState
@@ -93,7 +104,12 @@ private:
     void OnInitMenuPopup(CMenuHandle menu, UINT index, BOOL sysMenu);
     void OnDestroy();
     LRESULT OnFileOpen(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnFileSaveAs(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnFileExit(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnEditPaste(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnEditTransform(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnSortChanged(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnSaveDone(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnViewFit(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewActual(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewZoomIn(WORD code, WORD id, HWND control, BOOL& handled);
@@ -176,7 +192,16 @@ private:
     // Menu bar (Phase 2 step 8). Kept here while detached in fullscreen.
     CMenuHandle m_menu;
 
+    std::unique_ptr<ImageSaver> m_saver;
+    Settings m_settings;
+
     void ShowFileOpenDialog();
+    void ShowFileSaveDialog();
     void ShowAboutBox();
     void StepZoomAtCenter(int direction);
+    void PasteFromClipboard();
+    std::vector<uint8_t> ReadClipboardImageBlob();
+    void ApplyTransform(WORD commandId);
+    FolderScanner::SortSpec CurrentSortSpec() const;
+    void RescanFolder();
 };

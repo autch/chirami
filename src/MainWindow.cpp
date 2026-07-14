@@ -1,11 +1,13 @@
 #include "MainWindow.h"
+#include "ImageTransform.h"
 #include "resource.h"
 
 #include <shellapi.h>   // DragAcceptFiles, DragQueryFileW
-#include <shobjidl.h>   // IFileOpenDialog
+#include <shobjidl.h>   // IFileOpenDialog, IFileSaveDialog
 
 #include <algorithm>
 #include <cmath>
+#include <cwctype>
 #include <format>
 
 namespace
@@ -38,6 +40,29 @@ UINT ErrorStringId(HRESULT hr)
     return IDS_ERR_FILE_OPEN;
 }
 
+GUID ContainerFormatFromExtension(std::wstring extension)
+{
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](wchar_t ch) { return static_cast<wchar_t>(std::towlower(ch)); });
+    if (extension == L".png")
+    {
+        return GUID_ContainerFormatPng;
+    }
+    if (extension == L".jpg" || extension == L".jpeg" || extension == L".jfif")
+    {
+        return GUID_ContainerFormatJpeg;
+    }
+    if (extension == L".bmp")
+    {
+        return GUID_ContainerFormatBmp;
+    }
+    if (extension == L".tif" || extension == L".tiff")
+    {
+        return GUID_ContainerFormatTiff;
+    }
+    return GUID_NULL;
+}
+
 }  // namespace
 
 int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
@@ -52,6 +77,7 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
 
     m_loader = std::make_unique<ImageLoader>(m_hWnd, WM_APP_IMAGE_LOADED);
     m_scanner = std::make_unique<FolderScanner>(m_hWnd, WM_APP_FOLDER_SCANNED);
+    m_saver = std::make_unique<ImageSaver>(m_hWnd, WM_APP_SAVE_DONE);
 
     // Picks the resource language set up by SetThreadUILanguage.
     m_menu = CMenuHandle(LoadMenuW(_Module.GetResourceInstance(), MAKEINTRESOURCEW(IDR_MAINMENU)));
@@ -109,7 +135,7 @@ void MainWindow::LoadFile(std::filesystem::path path)
         m_currentFolder = std::move(folder);
         m_folderFiles.clear();
         m_currentIndex = -1;
-        m_expectedScanGeneration = m_scanner->RequestScan(m_currentFolder);
+        m_expectedScanGeneration = m_scanner->RequestScan(m_currentFolder, CurrentSortSpec());
     }
     else if (!m_folderFiles.empty())
     {
@@ -170,6 +196,8 @@ ptrdiff_t MainWindow::FindFolderIndex(const std::filesystem::path& path) const
 
 void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
 {
+    const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+
     switch (key)
     {
     case VK_LEFT:
@@ -195,9 +223,43 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
         SetZoomMode(ZoomMode::Fit);
         break;
     case 'O':
-        if (GetKeyState(VK_CONTROL) & 0x8000)
+        if (control)
         {
             ShowFileOpenDialog();
+        }
+        break;
+    case 'S':
+        if (control)
+        {
+            ShowFileSaveDialog();
+        }
+        break;
+    case 'R':
+        if (!control)
+        {
+            ApplyTransform(IDM_EDIT_ROTATE_CW);
+        }
+        break;
+    case 'L':
+        if (!control)
+        {
+            ApplyTransform(IDM_EDIT_ROTATE_CCW);
+        }
+        break;
+    case 'H':
+        if (!control)
+        {
+            ApplyTransform(IDM_EDIT_FLIP_H);
+        }
+        break;
+    case 'V':
+        if (control)
+        {
+            PasteFromClipboard();
+        }
+        else
+        {
+            ApplyTransform(IDM_EDIT_FLIP_V);
         }
         break;
     case VK_F11:
@@ -227,13 +289,223 @@ void MainWindow::OnInitMenuPopup(CMenuHandle menu, UINT /*index*/, BOOL sysMenu)
     {
         return;
     }
-    // No-ops for popups that don't contain these ids (File, Help).
+    // All calls below are no-ops for popups that don't contain the ids.
     const bool fit = m_zoomMode == ZoomMode::Fit;
     const bool actual = m_zoomMode == ZoomMode::ActualSize;
     menu.CheckMenuItem(IDM_VIEW_FIT, MF_BYCOMMAND | (fit ? MF_CHECKED : MF_UNCHECKED));
     menu.CheckMenuItem(IDM_VIEW_ACTUAL, MF_BYCOMMAND | (actual ? MF_CHECKED : MF_UNCHECKED));
     menu.CheckMenuItem(IDM_VIEW_FULLSCREEN,
                        MF_BYCOMMAND | (m_fullscreen ? MF_CHECKED : MF_UNCHECKED));
+
+    const UINT imageState = MF_BYCOMMAND | (m_cpuImage ? MF_ENABLED : MF_GRAYED);
+    menu.EnableMenuItem(IDM_FILE_SAVEAS, imageState);
+    for (UINT id = IDM_EDIT_ROTATE_CW; id <= IDM_EDIT_FLIP_V; ++id)
+    {
+        menu.EnableMenuItem(id, imageState);
+    }
+    const bool canPaste = IsClipboardFormatAvailable(CF_DIB)
+                          || IsClipboardFormatAvailable(RegisterClipboardFormatW(L"PNG"));
+    menu.EnableMenuItem(IDM_EDIT_PASTE, MF_BYCOMMAND | (canPaste ? MF_ENABLED : MF_GRAYED));
+
+    menu.CheckMenuRadioItem(IDM_SORT_NAME, IDM_SORT_SIZE,
+                            IDM_SORT_NAME + static_cast<UINT>(m_settings.sortKey), MF_BYCOMMAND);
+    menu.CheckMenuRadioItem(IDM_SORT_ASC, IDM_SORT_DESC,
+                            m_settings.sortDescending ? IDM_SORT_DESC : IDM_SORT_ASC,
+                            MF_BYCOMMAND);
+}
+
+FolderScanner::SortSpec MainWindow::CurrentSortSpec() const
+{
+    return {m_settings.sortKey, m_settings.sortDescending};
+}
+
+void MainWindow::RescanFolder()
+{
+    if (!m_currentFolder.empty())
+    {
+        m_expectedScanGeneration = m_scanner->RequestScan(m_currentFolder, CurrentSortSpec());
+    }
+}
+
+void MainWindow::ApplyTransform(WORD commandId)
+{
+    if (!m_cpuImage)
+    {
+        return;
+    }
+    switch (commandId)
+    {
+    case IDM_EDIT_ROTATE_CW:
+        m_cpuImage = RotateImage90(m_cpuImage, true);
+        break;
+    case IDM_EDIT_ROTATE_CCW:
+        m_cpuImage = RotateImage90(m_cpuImage, false);
+        break;
+    case IDM_EDIT_FLIP_H:
+        FlipImageHorizontal(m_cpuImage);
+        break;
+    case IDM_EDIT_FLIP_V:
+        FlipImageVertical(m_cpuImage);
+        break;
+    default:
+        return;
+    }
+    m_bitmap.reset();
+    ApplyAutoZoomForNewImage();  // dimensions may have swapped
+    UpdateScrollBars();
+    Invalidate(FALSE);
+}
+
+std::vector<uint8_t> MainWindow::ReadClipboardImageBlob()
+{
+    std::vector<uint8_t> blob;
+    if (!OpenClipboard())
+    {
+        return blob;
+    }
+    auto close = wil::scope_exit([] { CloseClipboard(); });
+
+    // Prefer the "PNG" format (browsers and editors put it there; it keeps
+    // alpha reliably), then fall back to CF_DIB wrapped as a .bmp blob so
+    // both go through the same WIC decode path.
+    if (HANDLE handle = GetClipboardData(RegisterClipboardFormatW(L"PNG")))
+    {
+        if (const void* data = GlobalLock(handle))
+        {
+            const auto* bytes = static_cast<const uint8_t*>(data);
+            blob.assign(bytes, bytes + GlobalSize(handle));
+            GlobalUnlock(handle);
+            return blob;
+        }
+    }
+    if (HANDLE handle = GetClipboardData(CF_DIB))
+    {
+        const size_t dibSize = GlobalSize(handle);
+        if (const void* data = GlobalLock(handle); data && dibSize >= sizeof(BITMAPINFOHEADER))
+        {
+            const auto* header = static_cast<const BITMAPINFOHEADER*>(data);
+            uint32_t offset = sizeof(BITMAPFILEHEADER) + header->biSize;
+            if (header->biCompression == BI_BITFIELDS
+                && header->biSize == sizeof(BITMAPINFOHEADER))
+            {
+                offset += 3 * sizeof(DWORD);  // color masks follow the header
+            }
+            uint32_t colors = header->biClrUsed;
+            if (colors == 0 && header->biBitCount <= 8)
+            {
+                colors = 1u << header->biBitCount;
+            }
+            offset += colors * sizeof(RGBQUAD);
+
+            BITMAPFILEHEADER fileHeader{};
+            fileHeader.bfType = 0x4D42;  // "BM"
+            fileHeader.bfSize = static_cast<DWORD>(sizeof(fileHeader) + dibSize);
+            fileHeader.bfOffBits = offset;
+
+            blob.resize(sizeof(fileHeader) + dibSize);
+            std::memcpy(blob.data(), &fileHeader, sizeof(fileHeader));
+            std::memcpy(blob.data() + sizeof(fileHeader), data, dibSize);
+            GlobalUnlock(handle);
+        }
+    }
+    return blob;
+}
+
+void MainWindow::PasteFromClipboard()
+{
+    std::vector<uint8_t> blob = ReadClipboardImageBlob();
+    if (blob.empty())
+    {
+        MessageBeep(MB_OK);
+        return;
+    }
+    // The pasted image has no file identity; arrow keys resume from the
+    // first/last file of the previously scanned folder.
+    m_currentPath.clear();
+    m_currentIndex = -1;
+    m_expectedGeneration =
+        m_loader->RequestLoadFromMemory(std::move(blob), LoadStringResource(IDS_CLIPBOARD_NAME));
+    m_state = ViewState::Loading;
+    m_statusText = LoadStringResource(IDS_STATUS_LOADING);
+    m_edgeWarned = false;
+    Invalidate(FALSE);
+}
+
+void MainWindow::ShowFileSaveDialog()
+try
+{
+    if (!m_cpuImage)
+    {
+        return;
+    }
+    auto dialog = wil::CoCreateInstance<IFileSaveDialog>(CLSID_FileSaveDialog);
+
+    const std::wstring pngName = LoadStringResource(IDS_FILTER_PNG);
+    const std::wstring jpegName = LoadStringResource(IDS_FILTER_JPEG);
+    const std::wstring bmpName = LoadStringResource(IDS_FILTER_BMP);
+    const std::wstring tiffName = LoadStringResource(IDS_FILTER_TIFF);
+    const COMDLG_FILTERSPEC filters[] = {
+        {pngName.c_str(), L"*.png"},
+        {jpegName.c_str(), L"*.jpg;*.jpeg"},
+        {bmpName.c_str(), L"*.bmp"},
+        {tiffName.c_str(), L"*.tif;*.tiff"},
+    };
+    THROW_IF_FAILED(dialog->SetFileTypes(ARRAYSIZE(filters), filters));
+    THROW_IF_FAILED(dialog->SetDefaultExtension(L"png"));
+    if (!m_currentPath.empty())
+    {
+        THROW_IF_FAILED(dialog->SetFileName(m_currentPath.stem().c_str()));
+    }
+
+    const HRESULT hr = dialog->Show(m_hWnd);
+    if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+    {
+        return;
+    }
+    THROW_IF_FAILED(hr);
+
+    wil::com_ptr<IShellItem> item;
+    THROW_IF_FAILED(dialog->GetResult(item.put()));
+    wil::unique_cotaskmem_string pathString;
+    THROW_IF_FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, pathString.put()));
+    std::filesystem::path path(pathString.get());
+
+    // The typed extension decides the format; fall back to the selected
+    // filter for unknown extensions.
+    GUID container = ContainerFormatFromExtension(path.extension().wstring());
+    if (container == GUID_NULL)
+    {
+        static const GUID kByFilterIndex[] = {
+            GUID_ContainerFormatPng,
+            GUID_ContainerFormatJpeg,
+            GUID_ContainerFormatBmp,
+            GUID_ContainerFormatTiff,
+        };
+        UINT typeIndex = 1;  // 1-based
+        (void)dialog->GetFileTypeIndex(&typeIndex);
+        container = kByFilterIndex[std::clamp<UINT>(typeIndex, 1, ARRAYSIZE(kByFilterIndex)) - 1];
+    }
+
+    if (!m_saver->RequestSave(std::move(path), container, m_cpuImage))
+    {
+        MessageBeep(MB_OK);  // previous save still in progress
+    }
+}
+CATCH_LOG()
+
+LRESULT MainWindow::OnSaveDone(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                               BOOL& /*handled*/)
+{
+    auto result = m_saver->TakeResult();
+    if (result && FAILED(result->hr))
+    {
+        const std::wstring text =
+            std::format(L"{} (0x{:08X})\n{}", LoadStringResource(IDS_ERR_SAVE),
+                        static_cast<unsigned>(result->hr), result->path.wstring());
+        MessageBoxW(text.c_str(), LoadStringResource(IDS_APP_TITLE).c_str(),
+                    MB_OK | MB_ICONERROR);
+    }
+    return 0;
 }
 
 void MainWindow::ShowFileOpenDialog()
@@ -279,6 +551,51 @@ void MainWindow::ShowAboutBox()
 LRESULT MainWindow::OnFileOpen(WORD, WORD, HWND, BOOL&)
 {
     ShowFileOpenDialog();
+    return 0;
+}
+
+LRESULT MainWindow::OnFileSaveAs(WORD, WORD, HWND, BOOL&)
+{
+    ShowFileSaveDialog();
+    return 0;
+}
+
+LRESULT MainWindow::OnEditPaste(WORD, WORD, HWND, BOOL&)
+{
+    PasteFromClipboard();
+    return 0;
+}
+
+LRESULT MainWindow::OnEditTransform(WORD, WORD id, HWND, BOOL&)
+{
+    ApplyTransform(id);
+    return 0;
+}
+
+LRESULT MainWindow::OnSortChanged(WORD, WORD id, HWND, BOOL&)
+{
+    switch (id)
+    {
+    case IDM_SORT_NAME:
+        m_settings.sortKey = SortKey::Name;
+        break;
+    case IDM_SORT_DATE:
+        m_settings.sortKey = SortKey::Date;
+        break;
+    case IDM_SORT_SIZE:
+        m_settings.sortKey = SortKey::Size;
+        break;
+    case IDM_SORT_ASC:
+        m_settings.sortDescending = false;
+        break;
+    case IDM_SORT_DESC:
+        m_settings.sortDescending = true;
+        break;
+    default:
+        return 0;
+    }
+    m_settings.Save();
+    RescanFolder();  // the current file keeps its identity; the index follows
     return 0;
 }
 
@@ -838,6 +1155,7 @@ void MainWindow::OnDestroy()
     // Stop and join the workers before the window goes away.
     m_loader.reset();
     m_scanner.reset();
+    m_saver.reset();
     // A menu attached to the window is destroyed with it; while fullscreen
     // it is detached and must be destroyed explicitly.
     if (m_fullscreen && !m_menu.IsNull())

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "framework.h"
+#include "Settings.h"  // SortKey
 
 #include <condition_variable>
 #include <filesystem>
@@ -18,6 +19,12 @@
 class FolderScanner
 {
 public:
+    struct SortSpec
+    {
+        SortKey key = SortKey::Name;
+        bool descending = false;
+    };
+
     struct Result
     {
         uint64_t generation = 0;
@@ -33,7 +40,7 @@ public:
 
     // Queues a scan request, replacing any request not yet started (latest
     // wins). Returns the generation id to match against Result::generation.
-    uint64_t RequestScan(std::filesystem::path folder);
+    uint64_t RequestScan(std::filesystem::path folder, SortSpec sort);
 
     // Takes the most recent completed result, emptying the mailbox.
     std::optional<Result> TakeResult();
@@ -43,10 +50,12 @@ private:
     {
         uint64_t generation = 0;
         std::filesystem::path folder;
+        SortSpec sort;
     };
 
     void WorkerProc(std::stop_token stopToken) noexcept;
     std::vector<std::filesystem::path> ScanFolder(const std::filesystem::path& folder,
+                                                  const SortSpec& sort,
                                                   const std::stop_token& stopToken);
     bool ShouldAbort(const std::stop_token& stopToken);
 
