@@ -16,11 +16,13 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 
 ## 機能 / Features
 
-- Windows 標準の WIC コーデックでデコード（JPEG, PNG, BMP, GIF, TIFF, ICO, WebP, AVIF など。OS に入っているコーデックを自動検出） / Decodes through the OS-provided WIC codecs (JPEG, PNG, BMP, GIF, TIFF, ICO, WebP, AVIF, ...; installed codecs are detected automatically)
+- Windows 標準の WIC コーデックでデコード（JPEG, PNG, BMP, GIF, TIFF, ICO, WebP, AVIF など。OS に入っているコーデックを自動検出し、一覧はバージョン情報で確認可能） / Decodes through the OS-provided WIC codecs (JPEG, PNG, BMP, GIF, TIFF, ICO, WebP, AVIF, ...; installed codecs are detected automatically and listed in the About box)
+- JPEG は同梱の libjpeg-turbo（任意）で高速デコード / JPEG decodes through the optionally bundled libjpeg-turbo
 - ファイル I/O とデコードは常にバックグラウンドで行い、UI は固まらない（遅い SMB / OneDrive でも操作可能） / File I/O and decoding always run in the background; the UI never freezes, even on slow SMB shares or OneDrive
 - 前後のファイルを自動で先読みし、←→での切り替えは瞬時 / Neighboring files are prefetched automatically, so flipping with the arrow keys is instant
 - GPU のテクスチャ上限を超える巨大画像（8K・16K 超）もタイル分割で表示（約 23000×23000 まで） / Images beyond the GPU texture limit (8K, 16K+) display through tiling, up to roughly 23000x23000
 - アニメーション GIF / WebP の再生（フレーム遅延・部分フレーム・透過に対応） / Animated GIF / WebP playback honoring frame delays, partial frames, and transparency
+- HDR 対応の描画パイプライン（FP16 scRGB スワップチェーン。16bit・float・10bit の高精度画像は精度を保ったまま表示され、HDR ディスプレイでは SDR 白を超える輝度も再現） / HDR-capable rendering pipeline (FP16 scRGB swap chain; 16-bit, float, and 10-bit images keep their precision, with brighter-than-SDR highlights on HDR displays)
 - フィット・等倍・自由ズーム、ドラッグでのパン、必要な軸のみのスクロールバー / Fit, actual-size, and free zoom with drag panning and per-axis scrollbars
 - 同一フォルダ内を前後移動（並び順は名前/更新日時/サイズ・昇順/降順を選択可、既定はエクスプローラーと同じ自然順。隠しファイルは対象外） / Flips through the folder (sort by name/date/size, ascending/descending; Explorer-like natural order by default; hidden files are skipped)
 - ファイルでもフォルダでも開ける（D&D・関連付け・コマンドライン。フォルダは中の最初の画像を表示） / Opens files and folders alike (drag & drop, file association, command line; a folder opens to its first image)
@@ -28,7 +30,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 - クロップと黒塗り（矩形選択は 8 方向ハンドルでリサイズ・ドラッグで移動と、後から調整可能） / Crop and blackout with a rubber-band selection that stays adjustable: resize via 8 handles, move by dragging
 - リサイズはピクセルでも % でも指定可能（4 つの入力欄がライブ連動。縦横比維持なら片方だけの指定で残りはなりゆき） / Resize by pixels or percent through four live-linked fields; with the aspect lock, entering any one value settles the rest
 - 設定は %APPDATA% の INI ファイルに保存（レジストリ不使用） / Settings live in an INI file under %APPDATA% (no registry)
-- 画像を開くたびにウィンドウサイズを画像に合わせて自動調整 / The window automatically resizes to wrap each image
+- 画像を開くたび・ズームのたびにウィンドウサイズが表示に追従（収まらなければスクロールバー） / The window tracks the displayed size on every open and zoom, with scrollbars once it can't
 - フルスクリーン表示 / Fullscreen mode
 - Per-Monitor V2 の DPI 対応（等倍表示は表示スケール設定に依らず dot-by-dot） / Per-Monitor V2 DPI awareness (actual size is true dot-by-dot regardless of display scaling)
 - 日本語 / 英語 UI（OS の言語設定に追従） / Japanese and English UI following the OS language
@@ -75,7 +77,9 @@ cmake --build --preset release
 
 CRT は静的リンクのため、VC++ 再頒布可能パッケージのインストールは不要です。 / The CRT is statically linked; no VC++ redistributable is required to run the binary.
 
-main への push ごとに GitHub Actions が release ビルドを行い、`chirami-win64` アーティファクトとして exe を生成します。 / Every push to main is built by GitHub Actions, producing the exe as the `chirami-win64` artifact.
+任意の `turbojpeg.dll` は `vcpkg install libjpeg-turbo:x64-windows` でビルドし、exe と同じフォルダに置きます。 / The optional `turbojpeg.dll` comes from `vcpkg install libjpeg-turbo:x64-windows`; place it next to the exe.
+
+main への push ごとに GitHub Actions が release ビルドを行い、`chirami-win64` アーティファクト（chirami.exe、turbojpeg.dll、ライセンス一式）を生成します。 / Every push to main is built by GitHub Actions, producing the `chirami-win64` artifact (chirami.exe, turbojpeg.dll, and the license files).
 
 ## サードパーティソフトウェア / Third-party software
 

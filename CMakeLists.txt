@@ -38,6 +38,8 @@ target_compile_definitions(chirami PRIVATE
 target_link_libraries(chirami PRIVATE
     WIL::WIL
     d2d1
+    d3d11
+    dxguid
     dwrite
     windowscodecs
     shlwapi

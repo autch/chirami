@@ -22,6 +22,56 @@ uint32_t NormalizeDelay(uint32_t delayMs)
     return delayMs < 20 ? 100 : delayMs;
 }
 
+// True when the source carries more than 8 bits per channel (16-bit ints,
+// halfs, floats, or the 10-bit packed formats); those decode into half
+// floats to preserve their range for the scRGB pipeline. An explicit list:
+// deriving this from bits-per-pixel / channel count gets fooled by padding
+// (32bppBGR is 32 bits for 3 channels but plain 8-bit).
+bool IsHighPrecisionFormat(IWICImagingFactory* /*factory*/, const WICPixelFormatGUID& format)
+{
+    static const WICPixelFormatGUID kHighPrecision[] = {
+        GUID_WICPixelFormat16bppGray,
+        GUID_WICPixelFormat16bppGrayHalf,
+        GUID_WICPixelFormat16bppGrayFixedPoint,
+        GUID_WICPixelFormat32bppGrayFloat,
+        GUID_WICPixelFormat32bppGrayFixedPoint,
+        GUID_WICPixelFormat32bppBGR101010,
+        GUID_WICPixelFormat32bppRGBA1010102,
+        GUID_WICPixelFormat32bppRGBA1010102XR,
+        GUID_WICPixelFormat32bppR10G10B10A2HDR10,
+        GUID_WICPixelFormat48bppRGB,
+        GUID_WICPixelFormat48bppBGR,
+        GUID_WICPixelFormat48bppRGBHalf,
+        GUID_WICPixelFormat48bppRGBFixedPoint,
+        GUID_WICPixelFormat48bppBGRFixedPoint,
+        GUID_WICPixelFormat64bppRGBA,
+        GUID_WICPixelFormat64bppBGRA,
+        GUID_WICPixelFormat64bppPRGBA,
+        GUID_WICPixelFormat64bppPBGRA,
+        GUID_WICPixelFormat64bppRGB,
+        GUID_WICPixelFormat64bppRGBHalf,
+        GUID_WICPixelFormat64bppRGBAHalf,
+        GUID_WICPixelFormat64bppPRGBAHalf,
+        GUID_WICPixelFormat64bppRGBFixedPoint,
+        GUID_WICPixelFormat64bppRGBAFixedPoint,
+        GUID_WICPixelFormat96bppRGBFloat,
+        GUID_WICPixelFormat96bppRGBFixedPoint,
+        GUID_WICPixelFormat128bppRGBFloat,
+        GUID_WICPixelFormat128bppRGBAFloat,
+        GUID_WICPixelFormat128bppPRGBAFloat,
+        GUID_WICPixelFormat128bppRGBFixedPoint,
+        GUID_WICPixelFormat128bppRGBAFixedPoint,
+    };
+    for (const auto& candidate : kHighPrecision)
+    {
+        if (format == candidate)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool TryReadUInt(IWICMetadataQueryReader* reader, PCWSTR name, uint32_t& value)
 {
     if (reader == nullptr)
@@ -392,9 +442,17 @@ try
     wil::com_ptr<IWICBitmapFrameDecode> frame;
     RETURN_IF_FAILED(decoder->GetFrame(0, frame.put()));
 
+    // High-precision sources keep their range as half floats; everything
+    // else takes the classic 8-bit sRGB path.
+    WICPixelFormatGUID nativeFormat{};
+    (void)frame->GetPixelFormat(&nativeFormat);
+    const bool wantHalf = IsHighPrecisionFormat(factory, nativeFormat);
+    const WICPixelFormatGUID targetFormat =
+        wantHalf ? GUID_WICPixelFormat64bppPRGBAHalf : GUID_WICPixelFormat32bppPBGRA;
+
     wil::com_ptr<IWICFormatConverter> converter;
     RETURN_IF_FAILED(factory->CreateFormatConverter(converter.put()));
-    RETURN_IF_FAILED(converter->Initialize(frame.get(), GUID_WICPixelFormat32bppPBGRA,
+    RETURN_IF_FAILED(converter->Initialize(frame.get(), targetFormat,
                                            WICBitmapDitherTypeNone, nullptr, 0.0,
                                            WICBitmapPaletteTypeCustom));
 
@@ -403,8 +461,10 @@ try
     RETURN_IF_FAILED(converter->GetSize(&width, &height));
     RETURN_HR_IF(WINCODEC_ERR_BADIMAGE, width == 0 || height == 0);
 
+    out.format = wantHalf ? LoadedImage::Format::Rgba16F : LoadedImage::Format::Bgra8;
+
     // 64-bit math: width/height come from the file and could overflow UINT.
-    const uint64_t stride64 = uint64_t{width} * 4;
+    const uint64_t stride64 = uint64_t{width} * out.BytesPerPixel();
     const uint64_t total64 = stride64 * height;
     RETURN_HR_IF(kHrImageTooLarge, total64 > kMaxPixelBytes);
 

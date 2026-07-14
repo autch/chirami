@@ -16,7 +16,9 @@ extern CAppModule _Module;
 #include <atluser.h>
 #include <atlcrack.h>
 
-#include <d2d1.h>
+#include <d2d1_1.h>
+#include <d3d11.h>
+#include <dxgi1_4.h>
 #include <dwrite.h>
 #include <wincodec.h>
 

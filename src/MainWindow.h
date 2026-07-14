@@ -40,6 +40,8 @@ public:
         MSG_WM_HSCROLL(OnHScroll)
         MSG_WM_VSCROLL(OnVScroll)
         MSG_WM_TIMER(OnTimer)
+        MSG_WM_MOVE(OnMove)
+        MESSAGE_HANDLER(WM_DISPLAYCHANGE, OnDisplayChange)
         MSG_WM_DROPFILES(OnDropFiles)
         MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
         MSG_WM_DESTROY(OnDestroy)
@@ -113,6 +115,8 @@ private:
     void OnHScroll(int code, short pos, HWND scrollBar);
     void OnVScroll(int code, short pos, HWND scrollBar);
     void OnTimer(UINT_PTR timerId);
+    void OnMove(CPoint position);
+    LRESULT OnDisplayChange(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     void OnDropFiles(HDROP drop);
     void OnInitMenuPopup(CMenuHandle menu, UINT index, BOOL sysMenu);
     void OnDestroy();
@@ -165,7 +169,7 @@ private:
     void SetStatusError(HRESULT hr);
 
     // Device-independent resources (created once in OnCreate)
-    wil::com_ptr<ID2D1Factory> m_d2dFactory;
+    wil::com_ptr<ID2D1Factory1> m_d2dFactory;
     wil::com_ptr<IWICImagingFactory> m_wicFactory;
     wil::com_ptr<IDWriteFactory> m_dwriteFactory;
     wil::com_ptr<IDWriteTextFormat> m_textFormat;
@@ -180,10 +184,29 @@ private:
         wil::com_ptr<ID2D1Bitmap> bitmap;
     };
 
-    // Device-dependent resources (recreated after D2DERR_RECREATE_TARGET)
-    wil::com_ptr<ID2D1HwndRenderTarget> m_renderTarget;
+    // Device-dependent resources (rebuilt after device loss). Rendering
+    // goes through an FP16 scRGB flip-model swap chain (the HDR-capable
+    // path from AGENTS.md); SDR tiles use an _SRGB format so the hardware
+    // linearizes them onto the linear-gamma target.
+    wil::com_ptr<ID3D11Device> m_d3dDevice;
+    wil::com_ptr<IDXGISwapChain1> m_swapChain;
+    wil::com_ptr<ID2D1Device> m_d2dDevice;
+    wil::com_ptr<ID2D1DeviceContext> m_d2dContext;
+    wil::com_ptr<ID2D1Bitmap1> m_targetBitmap;
+    wil::com_ptr<ID2D1Bitmap1> m_sceneBitmap;      // used when m_sdrBoost > 1
+    wil::com_ptr<ID2D1Effect> m_whiteLevelEffect;  // ColorMatrix scaling by m_sdrBoost
     wil::com_ptr<ID2D1SolidColorBrush> m_textBrush;
     std::vector<ImageTile> m_tiles;
+
+    // With HDR (advanced color) enabled, DWM boosts ordinary SDR windows to
+    // the user's SDR white level but composes scRGB surfaces at 1.0 == 80
+    // nits. Scaling the whole scene by this factor keeps chirami's SDR
+    // brightness in line with every other window; HDR pixels get the same
+    // headroom above it. 1.0 on SDR displays.
+    float m_sdrBoost = 1.0f;
+
+    HRESULT CreateTargetBitmap();
+    void UpdateSdrWhiteLevel();
 
     std::unique_ptr<ImageLoader> m_loader;
     std::unique_ptr<FolderScanner> m_scanner;

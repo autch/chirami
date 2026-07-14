@@ -6,15 +6,46 @@
 namespace
 {
 
-// Pixels are 4-byte BGRA words; stride == width * 4 by construction.
-const uint32_t* PixelRow(const LoadedImage& image, uint32_t y)
+// Rotation and horizontal flip move whole pixels; doing it on a fixed-size
+// integer keeps the loops simple and fast for both 4-byte (BGRA8) and
+// 8-byte (RGBA16F) pixels.
+template <typename Pixel>
+void Rotate90Pixels(const LoadedImage& source, LoadedImage& result, bool clockwise)
 {
-    return reinterpret_cast<const uint32_t*>(image.pixels.data() + size_t{y} * image.stride);
+    for (uint32_t y = 0; y < result.height; ++y)
+    {
+        auto* out = reinterpret_cast<Pixel*>(result.pixels.data() + size_t{y} * result.stride);
+        if (clockwise)
+        {
+            const uint32_t sourceX = y;
+            for (uint32_t x = 0; x < result.width; ++x)
+            {
+                const auto* row = reinterpret_cast<const Pixel*>(
+                    source.pixels.data() + size_t{source.height - 1 - x} * source.stride);
+                out[x] = row[sourceX];
+            }
+        }
+        else
+        {
+            const uint32_t sourceX = source.width - 1 - y;
+            for (uint32_t x = 0; x < result.width; ++x)
+            {
+                const auto* row = reinterpret_cast<const Pixel*>(source.pixels.data()
+                                                                 + size_t{x} * source.stride);
+                out[x] = row[sourceX];
+            }
+        }
+    }
 }
 
-uint32_t* PixelRow(LoadedImage& image, uint32_t y)
+template <typename Pixel>
+void FlipHorizontalPixels(LoadedImage& image)
 {
-    return reinterpret_cast<uint32_t*>(image.pixels.data() + size_t{y} * image.stride);
+    for (uint32_t y = 0; y < image.height; ++y)
+    {
+        auto* row = reinterpret_cast<Pixel*>(image.pixels.data() + size_t{y} * image.stride);
+        std::reverse(row, row + image.width);
+    }
 }
 
 }  // namespace
@@ -24,39 +55,30 @@ LoadedImage RotateImage90(const LoadedImage& source, bool clockwise)
     LoadedImage result;
     result.width = source.height;
     result.height = source.width;
-    result.stride = result.width * 4;
+    result.format = source.format;
+    result.stride = result.width * result.BytesPerPixel();
     result.pixels.resize(source.pixels.size());
 
-    for (uint32_t y = 0; y < result.height; ++y)
+    if (source.format == LoadedImage::Format::Rgba16F)
     {
-        uint32_t* out = PixelRow(result, y);
-        if (clockwise)
-        {
-            // dst(x, y) = src(y', x') with the source column read bottom-up
-            const uint32_t sourceX = y;
-            for (uint32_t x = 0; x < result.width; ++x)
-            {
-                out[x] = PixelRow(source, source.height - 1 - x)[sourceX];
-            }
-        }
-        else
-        {
-            const uint32_t sourceX = source.width - 1 - y;
-            for (uint32_t x = 0; x < result.width; ++x)
-            {
-                out[x] = PixelRow(source, x)[sourceX];
-            }
-        }
+        Rotate90Pixels<uint64_t>(source, result, clockwise);
+    }
+    else
+    {
+        Rotate90Pixels<uint32_t>(source, result, clockwise);
     }
     return result;
 }
 
 void FlipImageHorizontal(LoadedImage& image)
 {
-    for (uint32_t y = 0; y < image.height; ++y)
+    if (image.format == LoadedImage::Format::Rgba16F)
     {
-        uint32_t* row = PixelRow(image, y);
-        std::reverse(row, row + image.width);
+        FlipHorizontalPixels<uint64_t>(image);
+    }
+    else
+    {
+        FlipHorizontalPixels<uint32_t>(image);
     }
 }
 
@@ -79,13 +101,16 @@ LoadedImage CropImage(const LoadedImage& source, uint32_t x, uint32_t y, uint32_
     LoadedImage result;
     result.width = width;
     result.height = height;
-    result.stride = width * 4;
+    result.format = source.format;
+    result.stride = width * result.BytesPerPixel();
     result.pixels.resize(size_t{result.stride} * height);
 
+    const uint32_t bytesPerPixel = source.BytesPerPixel();
     for (uint32_t row = 0; row < height; ++row)
     {
         std::memcpy(result.pixels.data() + size_t{row} * result.stride,
-                    source.pixels.data() + size_t{y + row} * source.stride + size_t{x} * 4,
+                    source.pixels.data() + size_t{y + row} * source.stride
+                        + size_t{x} * bytesPerPixel,
                     result.stride);
     }
     return result;
@@ -95,10 +120,21 @@ void FillRectBlack(LoadedImage& image, uint32_t x, uint32_t y, uint32_t width, u
 {
     for (uint32_t row = 0; row < height; ++row)
     {
-        auto* pixels = reinterpret_cast<uint32_t*>(image.pixels.data()
-                                                   + size_t{y + row} * image.stride)
-                       + x;
-        std::fill_n(pixels, width, 0xFF000000u);  // opaque black
+        if (image.format == LoadedImage::Format::Rgba16F)
+        {
+            // Half floats: R=G=B=0.0, A=1.0 (0x3C00), little-endian words.
+            auto* pixels = reinterpret_cast<uint64_t*>(image.pixels.data()
+                                                       + size_t{y + row} * image.stride)
+                           + x;
+            std::fill_n(pixels, width, 0x3C00000000000000ull);
+        }
+        else
+        {
+            auto* pixels = reinterpret_cast<uint32_t*>(image.pixels.data()
+                                                       + size_t{y + row} * image.stride)
+                           + x;
+            std::fill_n(pixels, width, 0xFF000000u);  // opaque black
+        }
     }
 }
 
@@ -106,9 +142,13 @@ HRESULT ResizeImage(IWICImagingFactory* factory, const LoadedImage& source, uint
                     uint32_t height, LoadedImage& out) noexcept
 try
 {
+    const bool half = source.format == LoadedImage::Format::Rgba16F;
+    const WICPixelFormatGUID wicFormat =
+        half ? GUID_WICPixelFormat64bppPRGBAHalf : GUID_WICPixelFormat32bppPBGRA;
+
     wil::com_ptr<IWICBitmap> bitmap;
     RETURN_IF_FAILED(factory->CreateBitmapFromMemory(
-        source.width, source.height, GUID_WICPixelFormat32bppPBGRA, source.stride,
+        source.width, source.height, wicFormat, source.stride,
         static_cast<UINT>(source.pixels.size()),
         const_cast<BYTE*>(source.pixels.data()), bitmap.put()));
 
@@ -119,7 +159,8 @@ try
 
     out.width = width;
     out.height = height;
-    out.stride = width * 4;
+    out.format = source.format;
+    out.stride = width * out.BytesPerPixel();
     out.pixels.resize(size_t{out.stride} * height);
     RETURN_IF_FAILED(scaler->CopyPixels(nullptr, out.stride,
                                         static_cast<UINT>(out.pixels.size()),
