@@ -33,6 +33,8 @@
 #define IDM_EDIT_ROTATE_CCW     40303
 #define IDM_EDIT_FLIP_H         40304
 #define IDM_EDIT_FLIP_V         40305
+#define IDM_EDIT_CROP           40306
+#define IDM_EDIT_BLACKOUT       40307
 #define IDM_SORT_NAME           40401
 #define IDM_SORT_DATE           40402
 #define IDM_SORT_SIZE           40403

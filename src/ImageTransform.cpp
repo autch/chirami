@@ -72,3 +72,32 @@ void FlipImageVertical(LoadedImage& image)
         std::memcpy(bottom, scratch.data(), image.stride);
     }
 }
+
+LoadedImage CropImage(const LoadedImage& source, uint32_t x, uint32_t y, uint32_t width,
+                      uint32_t height)
+{
+    LoadedImage result;
+    result.width = width;
+    result.height = height;
+    result.stride = width * 4;
+    result.pixels.resize(size_t{result.stride} * height);
+
+    for (uint32_t row = 0; row < height; ++row)
+    {
+        std::memcpy(result.pixels.data() + size_t{row} * result.stride,
+                    source.pixels.data() + size_t{y + row} * source.stride + size_t{x} * 4,
+                    result.stride);
+    }
+    return result;
+}
+
+void FillRectBlack(LoadedImage& image, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    for (uint32_t row = 0; row < height; ++row)
+    {
+        auto* pixels = reinterpret_cast<uint32_t*>(image.pixels.data()
+                                                   + size_t{y + row} * image.stride)
+                       + x;
+        std::fill_n(pixels, width, 0xFF000000u);  // opaque black
+    }
+}

@@ -6,6 +6,7 @@
 #include "ImageLoader.h"
 #include "ImageSaver.h"
 #include "LoadedImage.h"
+#include "SelectionState.h"
 #include "Settings.h"
 #include "resource.h"
 
@@ -22,7 +23,7 @@ inline constexpr UINT WM_APP_PREFETCH_DONE = WM_APP + 4;
 class MainWindow : public CWindowImpl<MainWindow>
 {
 public:
-    DECLARE_WND_CLASS_EX(L"ChiramiMainWindow", CS_HREDRAW | CS_VREDRAW, -1)
+    DECLARE_WND_CLASS_EX(L"ChiramiMainWindow", CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS, -1)
 
     BEGIN_MSG_MAP(MainWindow)
         MSG_WM_CREATE(OnCreate)
@@ -30,9 +31,11 @@ public:
         MSG_WM_PAINT(OnPaint)
         MSG_WM_KEYDOWN(OnKeyDown)
         MSG_WM_LBUTTONDOWN(OnLButtonDown)
+        MSG_WM_LBUTTONDBLCLK(OnLButtonDblClk)
         MSG_WM_LBUTTONUP(OnLButtonUp)
         MSG_WM_MOUSEMOVE(OnMouseMove)
         MSG_WM_MOUSEWHEEL(OnMouseWheel)
+        MSG_WM_SETCURSOR(OnSetCursor)
         MSG_WM_CAPTURECHANGED(OnCaptureChanged)
         MSG_WM_HSCROLL(OnHScroll)
         MSG_WM_VSCROLL(OnVScroll)
@@ -48,6 +51,8 @@ public:
         COMMAND_ID_HANDLER(IDM_FILE_SAVEAS, OnFileSaveAs)
         COMMAND_ID_HANDLER(IDM_FILE_EXIT, OnFileExit)
         COMMAND_ID_HANDLER(IDM_EDIT_PASTE, OnEditPaste)
+        COMMAND_ID_HANDLER(IDM_EDIT_CROP, OnEditCrop)
+        COMMAND_ID_HANDLER(IDM_EDIT_BLACKOUT, OnEditBlackout)
         COMMAND_RANGE_HANDLER(IDM_EDIT_ROTATE_CW, IDM_EDIT_FLIP_V, OnEditTransform)
         COMMAND_RANGE_HANDLER(IDM_SORT_NAME, IDM_SORT_DESC, OnSortChanged)
         COMMAND_ID_HANDLER(IDM_VIEW_FIT, OnViewFit)
@@ -97,9 +102,11 @@ private:
     void OnPaint(CDCHandle dc);
     void OnKeyDown(UINT key, UINT repeatCount, UINT flags);
     void OnLButtonDown(UINT flags, CPoint point);
+    void OnLButtonDblClk(UINT flags, CPoint point);
     void OnLButtonUp(UINT flags, CPoint point);
     void OnMouseMove(UINT flags, CPoint point);
     BOOL OnMouseWheel(UINT flags, short delta, CPoint screenPoint);
+    BOOL OnSetCursor(CWindow window, UINT hitTest, UINT message);
     void OnCaptureChanged(HWND newCapture);
     void OnHScroll(int code, short pos, HWND scrollBar);
     void OnVScroll(int code, short pos, HWND scrollBar);
@@ -110,6 +117,8 @@ private:
     LRESULT OnFileSaveAs(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnFileExit(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnEditPaste(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnEditCrop(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnEditBlackout(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnEditTransform(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnSortChanged(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnSaveDone(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
@@ -213,6 +222,30 @@ private:
 
     void DisplayImage(const std::wstring& displayName, LoadedImage image);
     void TriggerPrefetch();
+
+    // Rubber-band selection for crop / blackout (Phase 3 step 16)
+    enum class SelectionPurpose
+    {
+        None,
+        Crop,
+        Blackout,
+    };
+    SelectionPurpose m_selectionPurpose = SelectionPurpose::None;
+    SelectionState m_selection;
+    wil::com_ptr<ID2D1StrokeStyle> m_dashStroke;  // device-independent
+
+    // Moving the selection only starts after the pointer travels past the
+    // system drag threshold, so clicks (and double-clicks) never nudge it.
+    bool m_movePending = false;
+    CPoint m_movePendingPoint{};
+
+    bool InSelectionMode() const { return m_selectionPurpose != SelectionPurpose::None; }
+    void EnterSelectionMode(SelectionPurpose purpose);
+    void ExitSelectionMode();
+    void ApplySelection();
+    void DrawSelectionOverlay(const ViewLayout& layout);
+    D2D1_POINT_2F ClientToImage(CPoint point, const ViewLayout& layout) const;
+    float SelectionHitTolerance(const ViewLayout& layout) const;
 
     void ShowFileOpenDialog();
     void ShowFileSaveDialog();

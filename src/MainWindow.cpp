@@ -74,6 +74,11 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
 {
     THROW_IF_FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, m_d2dFactory.put()));
     m_wicFactory = wil::CoCreateInstance<IWICImagingFactory>(CLSID_WICImagingFactory);
+    THROW_IF_FAILED(m_d2dFactory->CreateStrokeStyle(
+        D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+                                    D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.0f,
+                                    D2D1_DASH_STYLE_DASH, 0.0f),
+        nullptr, 0, m_dashStroke.put()));
 
     THROW_IF_FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                         reinterpret_cast<IUnknown**>(m_dwriteFactory.put())));
@@ -190,6 +195,8 @@ void MainWindow::OpenFolder(std::filesystem::path folder)
 
 void MainWindow::DisplayImage(const std::wstring& displayName, LoadedImage image)
 {
+    ExitSelectionMode();  // a selection never survives an image change
+
     // Recycle the outgoing image so navigating back is instant. Clipboard
     // content and edited (rotated/flipped) images have no on-disk identity
     // and are not cached.
@@ -326,6 +333,40 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
 {
     const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
 
+    if (InSelectionMode())
+    {
+        switch (key)
+        {
+        case VK_ESCAPE:
+            ExitSelectionMode();
+            return;
+        case VK_RETURN:
+            ApplySelection();
+            return;
+        // Navigation and pixel edits would invalidate the selection; zoom
+        // and pan keys remain available.
+        case VK_LEFT:
+        case VK_RIGHT:
+            return;
+        case 'R':
+        case 'L':
+        case 'H':
+            if (!control)
+            {
+                return;
+            }
+            break;
+        case 'V':
+            if (!control)
+            {
+                return;
+            }
+            break;
+        default:
+            break;
+        }
+    }
+
     switch (key)
     {
     case VK_LEFT:
@@ -390,6 +431,18 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
             ApplyTransform(IDM_EDIT_FLIP_V);
         }
         break;
+    case 'C':
+        if (!control)
+        {
+            EnterSelectionMode(SelectionPurpose::Crop);
+        }
+        break;
+    case 'B':
+        if (!control)
+        {
+            EnterSelectionMode(SelectionPurpose::Blackout);
+        }
+        break;
     case VK_F11:
         ToggleFullscreen();
         break;
@@ -427,10 +480,18 @@ void MainWindow::OnInitMenuPopup(CMenuHandle menu, UINT /*index*/, BOOL sysMenu)
 
     const UINT imageState = MF_BYCOMMAND | (m_cpuImage ? MF_ENABLED : MF_GRAYED);
     menu.EnableMenuItem(IDM_FILE_SAVEAS, imageState);
-    for (UINT id = IDM_EDIT_ROTATE_CW; id <= IDM_EDIT_FLIP_V; ++id)
+    for (UINT id = IDM_EDIT_ROTATE_CW; id <= IDM_EDIT_BLACKOUT; ++id)
     {
         menu.EnableMenuItem(id, imageState);
     }
+    menu.CheckMenuItem(IDM_EDIT_CROP,
+                       MF_BYCOMMAND
+                           | (m_selectionPurpose == SelectionPurpose::Crop ? MF_CHECKED
+                                                                           : MF_UNCHECKED));
+    menu.CheckMenuItem(IDM_EDIT_BLACKOUT,
+                       MF_BYCOMMAND
+                           | (m_selectionPurpose == SelectionPurpose::Blackout ? MF_CHECKED
+                                                                               : MF_UNCHECKED));
     const bool canPaste = IsClipboardFormatAvailable(CF_DIB)
                           || IsClipboardFormatAvailable(RegisterClipboardFormatW(L"PNG"));
     menu.EnableMenuItem(IDM_EDIT_PASTE, MF_BYCOMMAND | (canPaste ? MF_ENABLED : MF_GRAYED));
@@ -455,12 +516,98 @@ void MainWindow::RescanFolder()
     }
 }
 
+void MainWindow::EnterSelectionMode(SelectionPurpose purpose)
+{
+    if (!m_cpuImage)
+    {
+        return;
+    }
+    if (m_selectionPurpose == purpose)
+    {
+        ExitSelectionMode();  // the same command toggles the mode off
+        return;
+    }
+    // Switching between crop and blackout keeps the current rectangle.
+    m_selectionPurpose = purpose;
+    Invalidate(FALSE);
+}
+
+void MainWindow::ExitSelectionMode()
+{
+    if (!InSelectionMode())
+    {
+        return;
+    }
+    if (m_selection.Dragging())
+    {
+        ReleaseCapture();
+    }
+    m_selection.Reset();
+    m_selectionPurpose = SelectionPurpose::None;
+    Invalidate(FALSE);
+}
+
+void MainWindow::ApplySelection()
+{
+    if (!m_cpuImage || !m_selection.HasRect())
+    {
+        MessageBeep(MB_OK);
+        return;
+    }
+    const D2D1_RECT_F rect = m_selection.Rect();
+    const auto left = static_cast<uint32_t>(std::clamp(
+        std::lround(rect.left), 0L, static_cast<long>(m_cpuImage.width)));
+    const auto top = static_cast<uint32_t>(std::clamp(
+        std::lround(rect.top), 0L, static_cast<long>(m_cpuImage.height)));
+    const auto right = static_cast<uint32_t>(std::clamp(
+        std::lround(rect.right), 0L, static_cast<long>(m_cpuImage.width)));
+    const auto bottom = static_cast<uint32_t>(std::clamp(
+        std::lround(rect.bottom), 0L, static_cast<long>(m_cpuImage.height)));
+    if (right <= left || bottom <= top)
+    {
+        MessageBeep(MB_OK);
+        return;
+    }
+
+    // Baked into the pixels like rotate/flip: transient until saved, so the
+    // on-disk identity is dropped and the result stays out of the cache.
+    m_displayedPath.clear();
+    m_bitmap.reset();
+
+    if (m_selectionPurpose == SelectionPurpose::Crop)
+    {
+        m_cpuImage = CropImage(m_cpuImage, left, top, right - left, bottom - top);
+        ExitSelectionMode();
+        ApplyAutoZoomForNewImage();
+        UpdateScrollBars();
+    }
+    else
+    {
+        // Stay in the mode so several areas can be redacted in a row.
+        FillRectBlack(m_cpuImage, left, top, right - left, bottom - top);
+        m_selection.Reset();
+    }
+    Invalidate(FALSE);
+}
+
+D2D1_POINT_2F MainWindow::ClientToImage(CPoint point, const ViewLayout& layout) const
+{
+    return {(static_cast<float>(point.x) - layout.destX) / layout.scale,
+            (static_cast<float>(point.y) - layout.destY) / layout.scale};
+}
+
+float MainWindow::SelectionHitTolerance(const ViewLayout& layout) const
+{
+    return 8.0f * DpiScale() / layout.scale;  // screen pixels -> image pixels
+}
+
 void MainWindow::ApplyTransform(WORD commandId)
 {
     if (!m_cpuImage)
     {
         return;
     }
+    ExitSelectionMode();  // the rectangle would no longer match the pixels
     switch (commandId)
     {
     case IDM_EDIT_ROTATE_CW:
@@ -694,6 +841,18 @@ LRESULT MainWindow::OnFileSaveAs(WORD, WORD, HWND, BOOL&)
 LRESULT MainWindow::OnEditPaste(WORD, WORD, HWND, BOOL&)
 {
     PasteFromClipboard();
+    return 0;
+}
+
+LRESULT MainWindow::OnEditCrop(WORD, WORD, HWND, BOOL&)
+{
+    EnterSelectionMode(SelectionPurpose::Crop);
+    return 0;
+}
+
+LRESULT MainWindow::OnEditBlackout(WORD, WORD, HWND, BOOL&)
+{
+    EnterSelectionMode(SelectionPurpose::Blackout);
     return 0;
 }
 
@@ -1087,6 +1246,33 @@ void MainWindow::SetZoomMode(ZoomMode mode)
 
 void MainWindow::OnLButtonDown(UINT /*flags*/, CPoint point)
 {
+    if (InSelectionMode() && m_cpuImage)
+    {
+        const ViewLayout layout = ComputeLayout();
+        if (layout.scale <= 0.0f)
+        {
+            return;
+        }
+        const D2D1_POINT_2F imagePoint = ClientToImage(point, layout);
+        const SelectionHit hit =
+            m_selection.HitTest(imagePoint, SelectionHitTolerance(layout));
+        if (hit == SelectionHit::Inside)
+        {
+            // Arm the move but don't start it until the pointer passes the
+            // drag threshold; a (double-)click must not nudge the selection.
+            m_movePending = true;
+            m_movePendingPoint = point;
+            SetCapture();
+            return;
+        }
+        m_selection.BeginDrag(hit, imagePoint);
+        m_selection.UpdateDrag(imagePoint, static_cast<float>(m_cpuImage.width),
+                               static_cast<float>(m_cpuImage.height));
+        SetCapture();
+        Invalidate(FALSE);
+        return;
+    }
+
     const ViewLayout layout = ComputeLayout();
     if (layout.maxPanX > 0.0f || layout.maxPanY > 0.0f)
     {
@@ -1096,8 +1282,62 @@ void MainWindow::OnLButtonDown(UINT /*flags*/, CPoint point)
     }
 }
 
+void MainWindow::OnLButtonDblClk(UINT flags, CPoint point)
+{
+    if (InSelectionMode() && m_cpuImage && m_selection.HasRect())
+    {
+        const ViewLayout layout = ComputeLayout();
+        if (layout.scale > 0.0f
+            && m_selection.HitTest(ClientToImage(point, layout), SelectionHitTolerance(layout))
+                   == SelectionHit::Inside)
+        {
+            m_movePending = false;
+            if (GetCapture() == m_hWnd)
+            {
+                ReleaseCapture();
+            }
+            ApplySelection();
+            return;
+        }
+    }
+    // The second press of a fast double-click elsewhere behaves like a
+    // normal button-down.
+    OnLButtonDown(flags, point);
+}
+
 void MainWindow::OnMouseMove(UINT /*flags*/, CPoint point)
 {
+    if (m_movePending && m_cpuImage)
+    {
+        if (std::abs(point.x - m_movePendingPoint.x)
+                <= GetSystemMetricsForDpi(SM_CXDRAG, m_dpi)
+            && std::abs(point.y - m_movePendingPoint.y)
+                   <= GetSystemMetricsForDpi(SM_CYDRAG, m_dpi))
+        {
+            return;  // still within the click jitter zone
+        }
+        m_movePending = false;
+        const ViewLayout layout = ComputeLayout();
+        if (layout.scale <= 0.0f)
+        {
+            return;
+        }
+        m_selection.BeginDrag(SelectionHit::Inside,
+                              ClientToImage(m_movePendingPoint, layout));
+        // fall through to the drag update below
+    }
+    if (m_selection.Dragging() && m_cpuImage)
+    {
+        const ViewLayout layout = ComputeLayout();
+        if (layout.scale > 0.0f)
+        {
+            m_selection.UpdateDrag(ClientToImage(point, layout),
+                                   static_cast<float>(m_cpuImage.width),
+                                   static_cast<float>(m_cpuImage.height));
+            Invalidate(FALSE);
+        }
+        return;
+    }
     if (!m_dragging)
     {
         return;
@@ -1110,6 +1350,18 @@ void MainWindow::OnMouseMove(UINT /*flags*/, CPoint point)
 
 void MainWindow::OnLButtonUp(UINT /*flags*/, CPoint /*point*/)
 {
+    if (m_movePending)
+    {
+        m_movePending = false;  // it was just a click; nothing moved
+        ReleaseCapture();
+        return;
+    }
+    if (m_selection.Dragging())
+    {
+        m_selection.EndDrag();
+        ReleaseCapture();
+        return;
+    }
     if (m_dragging)
     {
         m_dragging = false;
@@ -1120,6 +1372,54 @@ void MainWindow::OnLButtonUp(UINT /*flags*/, CPoint /*point*/)
 void MainWindow::OnCaptureChanged(HWND /*newCapture*/)
 {
     m_dragging = false;
+    m_movePending = false;
+    m_selection.EndDrag();
+}
+
+BOOL MainWindow::OnSetCursor(CWindow /*window*/, UINT hitTest, UINT /*message*/)
+{
+    if (hitTest == HTCLIENT && InSelectionMode() && m_cpuImage)
+    {
+        CPoint point;
+        GetCursorPos(&point);
+        ScreenToClient(&point);
+
+        LPCWSTR cursor = IDC_CROSS;
+        const ViewLayout layout = ComputeLayout();
+        if (layout.scale > 0.0f)
+        {
+            switch (m_selection.HitTest(ClientToImage(point, layout),
+                                        SelectionHitTolerance(layout)))
+            {
+            case SelectionHit::NW:
+            case SelectionHit::SE:
+                cursor = IDC_SIZENWSE;
+                break;
+            case SelectionHit::NE:
+            case SelectionHit::SW:
+                cursor = IDC_SIZENESW;
+                break;
+            case SelectionHit::E:
+            case SelectionHit::W:
+                cursor = IDC_SIZEWE;
+                break;
+            case SelectionHit::N:
+            case SelectionHit::S:
+                cursor = IDC_SIZENS;
+                break;
+            case SelectionHit::Inside:
+                cursor = IDC_SIZEALL;
+                break;
+            case SelectionHit::None:
+            default:
+                break;
+            }
+        }
+        SetCursor(LoadCursorW(nullptr, cursor));
+        return TRUE;
+    }
+    SetMsgHandled(FALSE);
+    return FALSE;
 }
 
 BOOL MainWindow::OnMouseWheel(UINT flags, short delta, CPoint screenPoint)
@@ -1381,6 +1681,10 @@ void MainWindow::Render()
             D2D1::RectF(layout.destX, layout.destY, layout.destX + layout.displayWidth,
                         layout.destY + layout.displayHeight),
             1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        if (InSelectionMode() && m_selection.HasRect())
+        {
+            DrawSelectionOverlay(layout);
+        }
     }
     if (m_state == ViewState::Loading || m_state == ViewState::Error)
     {
@@ -1392,6 +1696,61 @@ void MainWindow::Render()
     {
         DiscardDeviceResources();
         Invalidate(FALSE);
+    }
+}
+
+void MainWindow::DrawSelectionOverlay(const ViewLayout& layout)
+{
+    const D2D1_RECT_F sel = m_selection.Rect();
+    const D2D1_RECT_F rect = D2D1::RectF(
+        layout.destX + sel.left * layout.scale, layout.destY + sel.top * layout.scale,
+        layout.destX + sel.right * layout.scale, layout.destY + sel.bottom * layout.scale);
+    const D2D1_SIZE_F client = m_renderTarget->GetSize();
+
+    if (m_selectionPurpose == SelectionPurpose::Crop)
+    {
+        // Dim everything that would be cut away.
+        m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::Black, 0.55f));
+        m_renderTarget->FillRectangle(D2D1::RectF(0.0f, 0.0f, client.width, rect.top),
+                                      m_textBrush.get());
+        m_renderTarget->FillRectangle(D2D1::RectF(0.0f, rect.bottom, client.width, client.height),
+                                      m_textBrush.get());
+        m_renderTarget->FillRectangle(D2D1::RectF(0.0f, rect.top, rect.left, rect.bottom),
+                                      m_textBrush.get());
+        m_renderTarget->FillRectangle(
+            D2D1::RectF(rect.right, rect.top, client.width, rect.bottom), m_textBrush.get());
+    }
+    else
+    {
+        // Preview of the redaction.
+        m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::Black, 0.8f));
+        m_renderTarget->FillRectangle(rect, m_textBrush.get());
+    }
+
+    // Rubber band: solid dark line with white dashes on top, visible over
+    // any image content.
+    m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::Black));
+    m_renderTarget->DrawRectangle(rect, m_textBrush.get(), 1.0f);
+    m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+    m_renderTarget->DrawRectangle(rect, m_textBrush.get(), 1.0f, m_dashStroke.get());
+
+    // 8 resize handles: corners and edge midpoints.
+    const float half = 4.0f * DpiScale();
+    const float midX = (rect.left + rect.right) / 2.0f;
+    const float midY = (rect.top + rect.bottom) / 2.0f;
+    const D2D1_POINT_2F handles[] = {
+        {rect.left, rect.top},  {midX, rect.top},    {rect.right, rect.top},
+        {rect.left, midY},                           {rect.right, midY},
+        {rect.left, rect.bottom}, {midX, rect.bottom}, {rect.right, rect.bottom},
+    };
+    for (const auto& center : handles)
+    {
+        const D2D1_RECT_F handle =
+            D2D1::RectF(center.x - half, center.y - half, center.x + half, center.y + half);
+        m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+        m_renderTarget->FillRectangle(handle, m_textBrush.get());
+        m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::Black));
+        m_renderTarget->DrawRectangle(handle, m_textBrush.get(), 1.0f);
     }
 }
 

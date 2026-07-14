@@ -41,6 +41,9 @@ BEGIN
         MENUITEM "左へ 90 度回転(&L)\tL",         IDM_EDIT_ROTATE_CCW
         MENUITEM "左右反転(&H)\tH",               IDM_EDIT_FLIP_H
         MENUITEM "上下反転(&V)\tV",               IDM_EDIT_FLIP_V
+        MENUITEM SEPARATOR
+        MENUITEM "クロップ(&C)\tC",               IDM_EDIT_CROP
+        MENUITEM "黒塗り(&B)\tB",                 IDM_EDIT_BLACKOUT
     END
     POPUP "表示(&V)"
     BEGIN
@@ -106,6 +109,9 @@ BEGIN
         MENUITEM "Rotate &Left 90°\tL",           IDM_EDIT_ROTATE_CCW
         MENUITEM "Flip &Horizontal\tH",           IDM_EDIT_FLIP_H
         MENUITEM "Flip &Vertical\tV",             IDM_EDIT_FLIP_V
+        MENUITEM SEPARATOR
+        MENUITEM "&Crop\tC",                      IDM_EDIT_CROP
+        MENUITEM "&Black Out\tB",                 IDM_EDIT_BLACKOUT
     END
     POPUP "&View"
     BEGIN
