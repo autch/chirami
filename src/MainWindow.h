@@ -88,6 +88,7 @@ private:
     void NavigateBy(int delta);
     ptrdiff_t FindFolderIndex(const std::filesystem::path& path) const;
     void ToggleFullscreen();
+    void ApplyAutoZoomForNewImage();
 
     ViewLayout ComputeLayout();
     void UpdateScrollBars();

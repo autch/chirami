@@ -207,6 +207,95 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
     }
 }
 
+// Re-evaluates the zoom (and the window size) whenever a new image arrives:
+// fullscreen keeps fit display; otherwise, if the image fits the monitor's
+// work area at 100% including the window chrome, the window shrinks/grows to
+// exactly wrap the image and shows it dot-by-dot. If it doesn't fit, the
+// window takes the largest image-shaped size the work area allows and the
+// image is displayed fit.
+void MainWindow::ApplyAutoZoomForNewImage()
+{
+    if (!m_cpuImage)
+    {
+        return;
+    }
+
+    if (m_fullscreen)
+    {
+        m_zoomMode = ZoomMode::Fit;
+        return;  // never touch the window while fullscreen
+    }
+
+    // Maximized: keep the window as-is, only pick the zoom mode.
+    if (IsZoomed())
+    {
+        CRect rc;
+        GetClientRect(&rc);
+        m_zoomMode = (static_cast<int>(m_cpuImage.width) <= rc.Width()
+                      && static_cast<int>(m_cpuImage.height) <= rc.Height())
+                         ? ZoomMode::ActualSize
+                         : ZoomMode::Fit;
+        return;
+    }
+
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    GetMonitorInfoW(MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST), &monitor);
+    const RECT& work = monitor.rcWork;
+    const int workWidth = work.right - work.left;
+    const int workHeight = work.bottom - work.top;
+
+    // Chrome: borders and caption (and the menu bar once Phase 2 adds one;
+    // switch bMenu to TRUE then). Scrollbars are excluded on purpose - the
+    // window is sized so that none are needed.
+    RECT frame{};
+    AdjustWindowRectExForDpi(&frame, GetStyle() & ~(WS_HSCROLL | WS_VSCROLL), FALSE,
+                             GetExStyle(), m_dpi);
+    const int chromeWidth = frame.right - frame.left;
+    const int chromeHeight = frame.bottom - frame.top;
+
+    const int imageWidth = static_cast<int>(m_cpuImage.width);
+    const int imageHeight = static_cast<int>(m_cpuImage.height);
+
+    int clientWidth;
+    int clientHeight;
+    if (imageWidth + chromeWidth <= workWidth && imageHeight + chromeHeight <= workHeight)
+    {
+        m_zoomMode = ZoomMode::ActualSize;
+        clientWidth = imageWidth;
+        clientHeight = imageHeight;
+    }
+    else
+    {
+        // Largest image-shaped client area the work area can hold; the long
+        // edge of the image ends up flush with the work area.
+        m_zoomMode = ZoomMode::Fit;
+        const float scale =
+            std::min(static_cast<float>(workWidth - chromeWidth) / imageWidth,
+                     static_cast<float>(workHeight - chromeHeight) / imageHeight);
+        clientWidth = static_cast<int>(std::round(imageWidth * scale));
+        clientHeight = static_cast<int>(std::round(imageHeight * scale));
+    }
+
+    int windowWidth = clientWidth + chromeWidth;
+    int windowHeight = clientHeight + chromeHeight;
+    windowWidth = std::max(windowWidth, GetSystemMetricsForDpi(SM_CXMINTRACK, m_dpi));
+    windowHeight = std::max(windowHeight, GetSystemMetricsForDpi(SM_CYMINTRACK, m_dpi));
+
+    // Keep the whole window inside the work area, moving it as little as
+    // possible from where the user put it.
+    CRect windowRect;
+    GetWindowRect(&windowRect);
+    const int x = std::clamp(static_cast<int>(windowRect.left), static_cast<int>(work.left),
+                             std::max(static_cast<int>(work.left),
+                                      static_cast<int>(work.right) - windowWidth));
+    const int y = std::clamp(static_cast<int>(windowRect.top), static_cast<int>(work.top),
+                             std::max(static_cast<int>(work.top),
+                                      static_cast<int>(work.bottom) - windowHeight));
+
+    SetWindowPos(nullptr, x, y, windowWidth, windowHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 void MainWindow::ToggleFullscreen()
 {
     if (!m_fullscreen)
@@ -579,7 +668,8 @@ LRESULT MainWindow::OnImageLoaded(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lPar
         m_state = ViewState::Loaded;
         m_panX = 0.0f;
         m_panY = 0.0f;
-        UpdateScrollBars();  // zoom mode carries over; ranges follow the new image
+        ApplyAutoZoomForNewImage();
+        UpdateScrollBars();
         SetWindowTextW((result->path.filename().wstring() + L" - "
                         + LoadStringResource(IDS_APP_TITLE)).c_str());
     }
