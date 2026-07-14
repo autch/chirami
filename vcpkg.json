@@ -4,6 +4,7 @@
   "builtin-baseline": "db4723bd0a99eab031f1a3dee4336dca43049c87",
   "dependencies": [
     "wtl",
-    "wil"
+    "wil",
+    "libjpeg-turbo"
   ]
 }

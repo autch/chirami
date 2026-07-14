@@ -1,4 +1,5 @@
 #include "ImageLoader.h"
+#include "TurboJpeg.h"
 
 #include <shlwapi.h>  // SHCreateMemStream
 
@@ -10,10 +11,6 @@ namespace
 {
 
 constexpr DWORD kReadChunkBytes = 1u << 20;  // 1 MiB
-
-// Generous sanity cap on decoded pixel data, checked before allocation so a
-// hostile header cannot request an absurd buffer.
-constexpr uint64_t kMaxPixelBytes = 2ull << 30;  // 2 GiB (~23K x 23K x 4)
 
 // Budget for all pre-composited animation frames together; an animation
 // beyond it falls back to a static first frame.
@@ -356,6 +353,14 @@ try
             RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_HANDLE_EOF), read == 0);
             offset += read;
         }
+    }
+
+    // JPEG goes through the optional libjpeg-turbo codec when its DLL is
+    // present; any failure there (CMYK, corrupt stream) falls back to WIC.
+    if (TurboJpeg::LooksLikeJpeg(data.data(), data.size()) && TurboJpeg::IsAvailable()
+        && SUCCEEDED(TurboJpeg::Decode(data.data(), data.size(), out)))
+    {
+        return S_OK;
     }
 
     wil::com_ptr<IStream> stream;

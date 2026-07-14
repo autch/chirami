@@ -17,6 +17,9 @@
 #define IDS_FILTER_TIFF         114
 #define IDS_ERR_NO_IMAGES       115
 #define IDS_ERR_RESIZE          116
+#define IDS_ABOUT_TJ_LOADED     117
+#define IDS_ABOUT_TJ_MISSING    118
+#define IDS_ABOUT_FORMATS       119
 
 #define IDR_MAINMENU            200
 

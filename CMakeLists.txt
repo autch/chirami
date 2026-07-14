@@ -19,6 +19,7 @@ add_executable(chirami WIN32
     src/MainWindow.cpp
     src/ImageLoader.cpp
     src/ImageSaver.cpp
+    src/TurboJpeg.cpp
     src/ImageTransform.cpp
     src/FolderScanner.cpp
     src/Settings.cpp

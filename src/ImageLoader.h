@@ -9,10 +9,6 @@
 #include <optional>
 #include <thread>
 
-// The decoded image exceeds the pixel budget or the render target's
-// maximum bitmap size. Tiling (Phase 3) will lift this limit.
-inline constexpr HRESULT kHrImageTooLarge = MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0x0200);
-
 // One frame of an animated image, pre-composited to the full canvas.
 struct AnimationFrame
 {

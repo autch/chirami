@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "ImageTransform.h"
 #include "ResizeDialog.h"
+#include "TurboJpeg.h"
 #include "resource.h"
 
 #include <shellapi.h>   // DragAcceptFiles, DragQueryFileW
@@ -873,8 +874,58 @@ void MainWindow::ShowResizeDialog()
 void MainWindow::ShowAboutBox()
 {
     const std::wstring version = CHIRAMI_VERSION;
-    const std::wstring text =
+    std::wstring text =
         std::vformat(LoadStringResource(IDS_ABOUT_TEXT), std::make_wformat_args(version));
+
+    // Asking is what loads the DLL on a JPEG-free session; that is fine,
+    // the answer should reflect reality.
+    text += L"\n\n";
+    text += LoadStringResource(TurboJpeg::IsAvailable() ? IDS_ABOUT_TJ_LOADED
+                                                        : IDS_ABOUT_TJ_MISSING);
+
+    // Enumerate the installed WIC decoders (registry-backed, fast).
+    text += L"\n\n" + LoadStringResource(IDS_ABOUT_FORMATS) + L"\n";
+    wil::com_ptr<IEnumUnknown> enumerator;
+    if (SUCCEEDED(m_wicFactory->CreateComponentEnumerator(
+            WICDecoder, WICComponentEnumerateDefault, enumerator.put())))
+    {
+        for (;;)
+        {
+            wil::com_ptr<IUnknown> unknown;
+            ULONG fetched = 0;
+            if (enumerator->Next(1, unknown.put(), &fetched) != S_OK)
+            {
+                break;
+            }
+            auto info = unknown.try_query<IWICBitmapCodecInfo>();
+            if (!info)
+            {
+                continue;
+            }
+            const auto readString = [&](auto method) {
+                std::wstring value;
+                UINT length = 0;
+                if (SUCCEEDED((info.get()->*method)(0, nullptr, &length)) && length > 0)
+                {
+                    value.resize(length);
+                    if (SUCCEEDED((info.get()->*method)(length, value.data(), &length)))
+                    {
+                        value.resize(wcslen(value.c_str()));
+                    }
+                    else
+                    {
+                        value.clear();
+                    }
+                }
+                return value;
+            };
+            const std::wstring name = readString(&IWICBitmapCodecInfo::GetFriendlyName);
+            std::wstring extensions = readString(&IWICBitmapCodecInfo::GetFileExtensions);
+            std::replace(extensions.begin(), extensions.end(), L',', L' ');
+            text += name + L" (" + extensions + L")\n";
+        }
+    }
+
     MessageBoxW(text.c_str(), LoadStringResource(IDS_ABOUT_TITLE).c_str(),
                 MB_OK | MB_ICONINFORMATION);
 }

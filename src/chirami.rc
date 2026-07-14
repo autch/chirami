@@ -23,6 +23,9 @@ BEGIN
     IDS_FILTER_TIFF          L"TIFF 画像"
     IDS_ERR_NO_IMAGES        L"表示できる画像がありません"
     IDS_ERR_RESIZE           L"リサイズできません"
+    IDS_ABOUT_TJ_LOADED      L"libjpeg-turbo: 使用中 (turbojpeg.dll)"
+    IDS_ABOUT_TJ_MISSING     L"libjpeg-turbo: 未検出（JPEG は WIC でデコード）"
+    IDS_ABOUT_FORMATS        L"対応形式 (WIC デコーダー):"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -114,6 +117,9 @@ BEGIN
     IDS_FILTER_TIFF          L"TIFF image"
     IDS_ERR_NO_IMAGES        L"No displayable images in this folder"
     IDS_ERR_RESIZE           L"Cannot resize image"
+    IDS_ABOUT_TJ_LOADED      L"libjpeg-turbo: loaded (turbojpeg.dll)"
+    IDS_ABOUT_TJ_MISSING     L"libjpeg-turbo: not found (JPEG decoded via WIC)"
+    IDS_ABOUT_FORMATS        L"Supported formats (WIC decoders):"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78

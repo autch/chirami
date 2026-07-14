@@ -42,12 +42,23 @@ jobs:
           if errorlevel 1 exit /b 1
           cmake --build --preset release
 
+      # Optional JPEG codec shipped alongside the exe. Classic-mode vcpkg
+      # refuses to run inside a manifest directory, hence the working-directory.
+      - name: Build optional turbojpeg.dll
+        shell: cmd
+        working-directory: ${{ runner.temp }}
+        run: vcpkg install libjpeg-turbo:x64-windows
+
       - name: Stage artifact contents
         shell: cmd
         run: |
           mkdir dist
+          mkdir dist\licenses
           copy build\release\chirami.exe dist\
           copy README.md dist\
+          copy LICENSE dist\
+          copy "%VCPKG_INSTALLATION_ROOT%\installed\x64-windows\bin\turbojpeg.dll" dist\
+          copy "%VCPKG_INSTALLATION_ROOT%\installed\x64-windows\share\libjpeg-turbo\copyright" dist\licenses\libjpeg-turbo.txt
 
       - uses: actions/upload-artifact@v7
         with:
