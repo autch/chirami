@@ -18,6 +18,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 
 - Windows 標準の WIC コーデックでデコード（JPEG, PNG, BMP, GIF, TIFF, ICO, WebP, AVIF など。OS に入っているコーデックを自動検出） / Decodes through the OS-provided WIC codecs (JPEG, PNG, BMP, GIF, TIFF, ICO, WebP, AVIF, ...; installed codecs are detected automatically)
 - ファイル I/O とデコードは常にバックグラウンドで行い、UI は固まらない（遅い SMB / OneDrive でも操作可能） / File I/O and decoding always run in the background; the UI never freezes, even on slow SMB shares or OneDrive
+- 前後のファイルを自動で先読みし、←→での切り替えは瞬時 / Neighboring files are prefetched automatically, so flipping with the arrow keys is instant
 - フィット・等倍・自由ズーム、ドラッグでのパン、必要な軸のみのスクロールバー / Fit, actual-size, and free zoom with drag panning and per-axis scrollbars
 - 同一フォルダ内を前後移動（並び順は名前/更新日時/サイズ・昇順/降順を選択可、既定はエクスプローラーと同じ自然順）、ドラッグ＆ドロップで開く / Flips through the folder (sort by name/date/size, ascending/descending; Explorer-like natural order by default); open files by drag & drop
 - フォーマットを変換して保存（PNG/JPEG/BMP/TIFF）、クリップボードからの貼り付け、90 度回転・反転 / Save as PNG/JPEG/BMP/TIFF, paste from the clipboard, rotate/flip

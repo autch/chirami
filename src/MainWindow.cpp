@@ -63,6 +63,11 @@ GUID ContainerFormatFromExtension(std::wstring extension)
     return GUID_NULL;
 }
 
+bool PathsEqualNoCase(const std::filesystem::path& a, const std::filesystem::path& b)
+{
+    return _wcsicmp(a.c_str(), b.c_str()) == 0;
+}
+
 }  // namespace
 
 int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
@@ -78,6 +83,7 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
     m_loader = std::make_unique<ImageLoader>(m_hWnd, WM_APP_IMAGE_LOADED);
     m_scanner = std::make_unique<FolderScanner>(m_hWnd, WM_APP_FOLDER_SCANNED);
     m_saver = std::make_unique<ImageSaver>(m_hWnd, WM_APP_SAVE_DONE);
+    m_prefetcher = std::make_unique<ImageLoader>(m_hWnd, WM_APP_PREFETCH_DONE);
 
     // Picks the resource language set up by SetThreadUILanguage.
     m_menu = CMenuHandle(LoadMenuW(_Module.GetResourceInstance(), MAKEINTRESOURCEW(IDR_MAINMENU)));
@@ -125,9 +131,6 @@ void MainWindow::LoadFile(std::filesystem::path path)
     }
 
     m_currentPath = std::move(path);
-    m_expectedGeneration = m_loader->RequestLoad(m_currentPath);
-    m_state = ViewState::Loading;
-    m_statusText = LoadStringResource(IDS_STATUS_LOADING);
     m_edgeWarned = false;
 
     if (auto folder = m_currentPath.parent_path(); folder != m_currentFolder)
@@ -135,6 +138,7 @@ void MainWindow::LoadFile(std::filesystem::path path)
         m_currentFolder = std::move(folder);
         m_folderFiles.clear();
         m_currentIndex = -1;
+        m_prefetchFailed.clear();
         m_expectedScanGeneration = m_scanner->RequestScan(m_currentFolder, CurrentSortSpec());
     }
     else if (!m_folderFiles.empty())
@@ -142,7 +146,103 @@ void MainWindow::LoadFile(std::filesystem::path path)
         m_currentIndex = FindFolderIndex(m_currentPath);
     }
 
+    if (auto cached = m_cache.Take(m_currentPath))
+    {
+        // Prefetched: display immediately, no loader round trip. Generation 0
+        // never matches a real one, so any in-flight load result is dropped.
+        m_expectedGeneration = 0;
+        DisplayImage(m_currentPath.filename().wstring(), std::move(*cached));
+        return;
+    }
+    m_expectedGeneration = m_loader->RequestLoad(m_currentPath);
+    m_state = ViewState::Loading;
+    m_statusText = LoadStringResource(IDS_STATUS_LOADING);
     Invalidate(FALSE);
+}
+
+void MainWindow::DisplayImage(const std::wstring& displayName, LoadedImage image)
+{
+    // Recycle the outgoing image so navigating back is instant. Clipboard
+    // content and edited (rotated/flipped) images have no on-disk identity
+    // and are not cached.
+    if (m_cpuImage && !m_displayedPath.empty())
+    {
+        m_cache.Put(std::move(m_displayedPath), std::move(m_cpuImage));
+    }
+    m_displayedPath = m_currentPath;
+
+    m_cpuImage = std::move(image);
+    m_bitmap.reset();  // recreated from m_cpuImage on next render
+    m_state = ViewState::Loaded;
+    m_panX = 0.0f;
+    m_panY = 0.0f;
+    ApplyAutoZoomForNewImage();
+    UpdateScrollBars();
+    SetWindowTextW((displayName + L" - " + LoadStringResource(IDS_APP_TITLE)).c_str());
+    Invalidate(FALSE);
+
+    TriggerPrefetch();
+}
+
+void MainWindow::TriggerPrefetch()
+{
+    if (m_folderFiles.empty() || m_currentIndex < 0)
+    {
+        return;
+    }
+
+    // Next first (the more likely direction), then previous.
+    std::vector<std::filesystem::path> wanted;
+    if (m_currentIndex + 1 < static_cast<ptrdiff_t>(m_folderFiles.size()))
+    {
+        wanted.push_back(m_folderFiles[static_cast<size_t>(m_currentIndex) + 1]);
+    }
+    if (m_currentIndex > 0)
+    {
+        wanted.push_back(m_folderFiles[static_cast<size_t>(m_currentIndex) - 1]);
+    }
+    m_cache.KeepOnly(wanted);
+
+    for (const auto& path : wanted)
+    {
+        if (m_cache.Contains(path) || PathsEqualNoCase(path, m_displayedPath))
+        {
+            continue;
+        }
+        if (std::ranges::any_of(m_prefetchFailed,
+                                [&](const auto& failed) { return PathsEqualNoCase(failed, path); }))
+        {
+            continue;
+        }
+        if (PathsEqualNoCase(path, m_prefetchPath))
+        {
+            return;  // already being fetched
+        }
+        m_prefetchPath = path;
+        m_prefetchGeneration = m_prefetcher->RequestLoad(path);
+        return;  // one at a time; completion re-triggers for the other one
+    }
+}
+
+LRESULT MainWindow::OnPrefetchDone(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                   BOOL& /*handled*/)
+{
+    auto result = m_prefetcher->TakeResult();
+    if (!result || result->generation != m_prefetchGeneration)
+    {
+        return 0;
+    }
+    m_prefetchPath.clear();
+    if (SUCCEEDED(result->hr))
+    {
+        m_cache.Put(result->path, std::move(result->image));
+    }
+    else
+    {
+        m_prefetchFailed.push_back(result->path);  // no retry loops
+    }
+    TriggerPrefetch();
+    return 0;
 }
 
 void MainWindow::NavigateBy(int delta)
@@ -350,6 +450,9 @@ void MainWindow::ApplyTransform(WORD commandId)
     default:
         return;
     }
+    // Edits are transient until saved; drop the on-disk identity so the
+    // edited pixels never enter the prefetch cache.
+    m_displayedPath.clear();
     m_bitmap.reset();
     ApplyAutoZoomForNewImage();  // dimensions may have swapped
     UpdateScrollBars();
@@ -1096,20 +1199,12 @@ LRESULT MainWindow::OnImageLoaded(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lPar
     {
         // Keep the previous image (if any); the message overlays it.
         SetStatusError(result->hr);
+        Invalidate(FALSE);
     }
     else
     {
-        m_cpuImage = std::move(result->image);
-        m_bitmap.reset();  // recreated from m_cpuImage on next render
-        m_state = ViewState::Loaded;
-        m_panX = 0.0f;
-        m_panY = 0.0f;
-        ApplyAutoZoomForNewImage();
-        UpdateScrollBars();
-        SetWindowTextW((result->path.filename().wstring() + L" - "
-                        + LoadStringResource(IDS_APP_TITLE)).c_str());
+        DisplayImage(result->path.filename().wstring(), std::move(result->image));
     }
-    Invalidate(FALSE);
     return 0;
 }
 
@@ -1123,6 +1218,7 @@ LRESULT MainWindow::OnFolderScanned(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lP
     }
     m_folderFiles = std::move(result->files);
     m_currentIndex = FindFolderIndex(m_currentPath);
+    TriggerPrefetch();
     return 0;
 }
 
@@ -1156,6 +1252,7 @@ void MainWindow::OnDestroy()
     m_loader.reset();
     m_scanner.reset();
     m_saver.reset();
+    m_prefetcher.reset();
     // A menu attached to the window is destroyed with it; while fullscreen
     // it is detached and must be destroyed explicitly.
     if (m_fullscreen && !m_menu.IsNull())

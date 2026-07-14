@@ -2,6 +2,7 @@
 
 #include "framework.h"
 #include "FolderScanner.h"
+#include "ImageCache.h"
 #include "ImageLoader.h"
 #include "ImageSaver.h"
 #include "LoadedImage.h"
@@ -16,6 +17,7 @@
 inline constexpr UINT WM_APP_IMAGE_LOADED = WM_APP + 1;
 inline constexpr UINT WM_APP_FOLDER_SCANNED = WM_APP + 2;
 inline constexpr UINT WM_APP_SAVE_DONE = WM_APP + 3;
+inline constexpr UINT WM_APP_PREFETCH_DONE = WM_APP + 4;
 
 class MainWindow : public CWindowImpl<MainWindow>
 {
@@ -41,6 +43,7 @@ public:
         MESSAGE_HANDLER(WM_APP_IMAGE_LOADED, OnImageLoaded)
         MESSAGE_HANDLER(WM_APP_FOLDER_SCANNED, OnFolderScanned)
         MESSAGE_HANDLER(WM_APP_SAVE_DONE, OnSaveDone)
+        MESSAGE_HANDLER(WM_APP_PREFETCH_DONE, OnPrefetchDone)
         COMMAND_ID_HANDLER(IDM_FILE_OPEN, OnFileOpen)
         COMMAND_ID_HANDLER(IDM_FILE_SAVEAS, OnFileSaveAs)
         COMMAND_ID_HANDLER(IDM_FILE_EXIT, OnFileExit)
@@ -110,6 +113,7 @@ private:
     LRESULT OnEditTransform(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnSortChanged(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnSaveDone(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnPrefetchDone(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnViewFit(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewActual(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewZoomIn(WORD code, WORD id, HWND control, BOOL& handled);
@@ -194,6 +198,19 @@ private:
 
     std::unique_ptr<ImageSaver> m_saver;
     Settings m_settings;
+
+    // Prefetching (Phase 3): a second loader fills m_cache with the current
+    // file's neighbors so arrow-key navigation displays instantly.
+    std::unique_ptr<ImageLoader> m_prefetcher;
+    ImageCache m_cache;
+    std::filesystem::path m_displayedPath;   // identity of m_cpuImage; empty
+                                             // for clipboard or edited images
+    std::filesystem::path m_prefetchPath;    // request in flight, if any
+    uint64_t m_prefetchGeneration = 0;
+    std::vector<std::filesystem::path> m_prefetchFailed;  // don't retry these
+
+    void DisplayImage(const std::wstring& displayName, LoadedImage image);
+    void TriggerPrefetch();
 
     void ShowFileOpenDialog();
     void ShowFileSaveDialog();
