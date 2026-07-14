@@ -4,10 +4,18 @@
 #include <shellapi.h>  // DragAcceptFiles, DragQueryFileW
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 
 namespace
 {
+
+constexpr float kMinZoom = 0.01f;
+constexpr float kMaxZoom = 32.0f;
+constexpr float kZoomStep = 1.25f;
+constexpr float kScrollLine = 48.0f;    // 96-DPI pixels per scrollbar arrow
+constexpr float kWheelScroll = 96.0f;   // 96-DPI pixels per wheel notch
+constexpr float kStatusFontSize = 16.0f;  // 96-DPI pixels
 
 std::wstring LoadStringResource(UINT id)
 {
@@ -38,16 +46,41 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
 
     THROW_IF_FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                         reinterpret_cast<IUnknown**>(m_dwriteFactory.put())));
-    THROW_IF_FAILED(m_dwriteFactory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, 16.0f, L"", m_textFormat.put()));
-    THROW_IF_FAILED(m_textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER));
-    THROW_IF_FAILED(m_textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER));
+    m_dpi = GetDpiForWindow(m_hWnd);
+    THROW_IF_FAILED(CreateTextFormat());
 
     m_loader = std::make_unique<ImageLoader>(m_hWnd, WM_APP_IMAGE_LOADED);
     m_scanner = std::make_unique<FolderScanner>(m_hWnd, WM_APP_FOLDER_SCANNED);
 
     DragAcceptFiles(TRUE);
+    return 0;
+}
+
+HRESULT MainWindow::CreateTextFormat()
+{
+    // The render target is fixed at 96 DPI (1 DIP == 1 physical pixel), so
+    // our own UI text has to scale with the window DPI explicitly.
+    m_textFormat.reset();
+    RETURN_IF_FAILED(m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, kStatusFontSize * DpiScale(), L"", m_textFormat.put()));
+    RETURN_IF_FAILED(m_textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER));
+    RETURN_IF_FAILED(m_textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER));
+    return S_OK;
+}
+
+LRESULT MainWindow::OnDpiChanged(UINT /*msg*/, WPARAM wParam, LPARAM lParam, BOOL& /*handled*/)
+{
+    m_dpi = LOWORD(wParam);
+    LOG_IF_FAILED(CreateTextFormat());
+
+    // Adopt the size the OS suggests for the new monitor; the resulting
+    // WM_SIZE updates the render target and scrollbars.
+    if (const RECT* suggested = reinterpret_cast<const RECT*>(lParam))
+    {
+        SetWindowPos(nullptr, suggested, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    Invalidate(FALSE);
     return 0;
 }
 
@@ -132,6 +165,10 @@ ptrdiff_t MainWindow::FindFolderIndex(const std::filesystem::path& path) const
 
 void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
 {
+    CRect rc;
+    GetClientRect(&rc);
+    const CPoint center(rc.Width() / 2, rc.Height() / 2);
+
     switch (key)
     {
     case VK_LEFT:
@@ -140,9 +177,326 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
     case VK_RIGHT:
         NavigateBy(+1);
         break;
+    case VK_OEM_PLUS:
+    case VK_ADD:
+        StepZoom(+1, center);
+        break;
+    case VK_OEM_MINUS:
+    case VK_SUBTRACT:
+        StepZoom(-1, center);
+        break;
+    case '1':
+    case VK_NUMPAD1:
+        ToggleActualSize();
+        break;
     default:
         break;
     }
+}
+
+MainWindow::ViewLayout MainWindow::ComputeLayout()
+{
+    ViewLayout layout;
+    if (!m_cpuImage)
+    {
+        return layout;
+    }
+
+    CRect rc;
+    GetClientRect(&rc);
+    const float clientWidth = static_cast<float>(rc.Width());
+    const float clientHeight = static_cast<float>(rc.Height());
+    const float imageWidth = static_cast<float>(m_cpuImage.width);
+    const float imageHeight = static_cast<float>(m_cpuImage.height);
+
+    switch (m_zoomMode)
+    {
+    case ZoomMode::Fit:
+        // Shrink to fit while keeping the aspect ratio, never upscale.
+        layout.scale = std::min(
+            {1.0f, clientWidth / imageWidth, clientHeight / imageHeight});
+        break;
+    case ZoomMode::ActualSize:
+        layout.scale = 1.0f;
+        break;
+    case ZoomMode::Custom:
+        layout.scale = m_zoomScale;
+        break;
+    }
+
+    layout.displayWidth = imageWidth * layout.scale;
+    layout.displayHeight = imageHeight * layout.scale;
+    layout.maxPanX = std::max(0.0f, layout.displayWidth - clientWidth);
+    layout.maxPanY = std::max(0.0f, layout.displayHeight - clientHeight);
+
+    m_panX = std::clamp(m_panX, 0.0f, layout.maxPanX);
+    m_panY = std::clamp(m_panY, 0.0f, layout.maxPanY);
+
+    // Integer pixel offsets keep 100% display exactly dot-by-dot.
+    layout.destX = layout.maxPanX > 0.0f
+                       ? -std::round(m_panX)
+                       : std::round((clientWidth - layout.displayWidth) / 2.0f);
+    layout.destY = layout.maxPanY > 0.0f
+                       ? -std::round(m_panY)
+                       : std::round((clientHeight - layout.displayHeight) / 2.0f);
+    return layout;
+}
+
+void MainWindow::UpdateScrollBars()
+{
+    // ShowScrollBar changes the client size and re-enters via WM_SIZE.
+    if (m_updatingScrollBars || !IsWindow())
+    {
+        return;
+    }
+    m_updatingScrollBars = true;
+    auto guard = wil::scope_exit([&] { m_updatingScrollBars = false; });
+
+    bool needH = false;
+    bool needV = false;
+    float displayWidth = 0.0f;
+    float displayHeight = 0.0f;
+
+    // Fit mode never overflows the client area, so bars stay hidden.
+    if (m_cpuImage && m_zoomMode != ZoomMode::Fit)
+    {
+        const float scale = m_zoomMode == ZoomMode::ActualSize ? 1.0f : m_zoomScale;
+        displayWidth = static_cast<float>(m_cpuImage.width) * scale;
+        displayHeight = static_cast<float>(m_cpuImage.height) * scale;
+
+        // Decide visibility against the bar-less ("gross") client size; each
+        // bar that becomes visible steals space, which can force the other
+        // one, hence the two passes.
+        CRect rc;
+        GetClientRect(&rc);
+        const int barWidth = GetSystemMetrics(SM_CXVSCROLL);
+        const int barHeight = GetSystemMetrics(SM_CYHSCROLL);
+        const DWORD style = GetStyle();
+        const int grossWidth = rc.Width() + ((style & WS_VSCROLL) ? barWidth : 0);
+        const int grossHeight = rc.Height() + ((style & WS_HSCROLL) ? barHeight : 0);
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            const float availWidth = static_cast<float>(grossWidth - (needV ? barWidth : 0));
+            const float availHeight = static_cast<float>(grossHeight - (needH ? barHeight : 0));
+            needH = displayWidth > availWidth;
+            needV = displayHeight > availHeight;
+        }
+    }
+
+    const DWORD style = GetStyle();
+    if (needH != ((style & WS_HSCROLL) != 0))
+    {
+        ShowScrollBar(SB_HORZ, needH);
+    }
+    if (needV != ((style & WS_VSCROLL) != 0))
+    {
+        ShowScrollBar(SB_VERT, needV);
+    }
+
+    CRect rc;
+    GetClientRect(&rc);
+    SCROLLINFO si{};
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    if (needH)
+    {
+        si.nMin = 0;
+        si.nMax = static_cast<int>(displayWidth) - 1;
+        si.nPage = rc.Width();
+        si.nPos = static_cast<int>(m_panX);
+        SetScrollInfo(SB_HORZ, &si, TRUE);
+    }
+    if (needV)
+    {
+        si.nMin = 0;
+        si.nMax = static_cast<int>(displayHeight) - 1;
+        si.nPage = rc.Height();
+        si.nPos = static_cast<int>(m_panY);
+        SetScrollInfo(SB_VERT, &si, TRUE);
+    }
+}
+
+void MainWindow::SyncScrollPositions()
+{
+    const DWORD style = GetStyle();
+    SCROLLINFO si{};
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_POS;
+    if (style & WS_HSCROLL)
+    {
+        si.nPos = static_cast<int>(m_panX);
+        SetScrollInfo(SB_HORZ, &si, TRUE);
+    }
+    if (style & WS_VSCROLL)
+    {
+        si.nPos = static_cast<int>(m_panY);
+        SetScrollInfo(SB_VERT, &si, TRUE);
+    }
+}
+
+void MainWindow::UpdateView()
+{
+    ComputeLayout();  // clamps pan
+    SyncScrollPositions();
+    Invalidate(FALSE);
+}
+
+void MainWindow::ApplyZoom(float newScale, CPoint anchor)
+{
+    newScale = std::clamp(newScale, kMinZoom, kMaxZoom);
+    const ViewLayout layout = ComputeLayout();
+    if (layout.scale <= 0.0f || newScale == layout.scale)
+    {
+        return;
+    }
+
+    // Keep the image point under `anchor` stationary on screen.
+    const float imageX = (static_cast<float>(anchor.x) - layout.destX) / layout.scale;
+    const float imageY = (static_cast<float>(anchor.y) - layout.destY) / layout.scale;
+
+    m_zoomMode = ZoomMode::Custom;
+    m_zoomScale = newScale;
+    m_panX = imageX * newScale - static_cast<float>(anchor.x);
+    m_panY = imageY * newScale - static_cast<float>(anchor.y);
+
+    UpdateScrollBars();
+    UpdateView();
+}
+
+void MainWindow::StepZoom(int direction, CPoint anchor)
+{
+    const ViewLayout layout = ComputeLayout();
+    if (layout.scale <= 0.0f)
+    {
+        return;
+    }
+    ApplyZoom(direction > 0 ? layout.scale * kZoomStep : layout.scale / kZoomStep, anchor);
+}
+
+void MainWindow::ToggleActualSize()
+{
+    if (!m_cpuImage)
+    {
+        return;
+    }
+    m_zoomMode = m_zoomMode == ZoomMode::ActualSize ? ZoomMode::Fit : ZoomMode::ActualSize;
+    UpdateScrollBars();
+
+    // Start centered when entering actual size.
+    const ViewLayout layout = ComputeLayout();
+    m_panX = layout.maxPanX / 2.0f;
+    m_panY = layout.maxPanY / 2.0f;
+    UpdateView();
+}
+
+void MainWindow::OnLButtonDown(UINT /*flags*/, CPoint point)
+{
+    const ViewLayout layout = ComputeLayout();
+    if (layout.maxPanX > 0.0f || layout.maxPanY > 0.0f)
+    {
+        m_dragging = true;
+        m_dragLast = point;
+        SetCapture();
+    }
+}
+
+void MainWindow::OnMouseMove(UINT /*flags*/, CPoint point)
+{
+    if (!m_dragging)
+    {
+        return;
+    }
+    m_panX -= static_cast<float>(point.x - m_dragLast.x);
+    m_panY -= static_cast<float>(point.y - m_dragLast.y);
+    m_dragLast = point;
+    UpdateView();
+}
+
+void MainWindow::OnLButtonUp(UINT /*flags*/, CPoint /*point*/)
+{
+    if (m_dragging)
+    {
+        m_dragging = false;
+        ReleaseCapture();
+    }
+}
+
+void MainWindow::OnCaptureChanged(HWND /*newCapture*/)
+{
+    m_dragging = false;
+}
+
+BOOL MainWindow::OnMouseWheel(UINT flags, short delta, CPoint screenPoint)
+{
+    CPoint point = screenPoint;
+    ScreenToClient(&point);
+    if (flags & MK_CONTROL)
+    {
+        StepZoom(delta > 0 ? +1 : -1, point);
+    }
+    else
+    {
+        m_panY -= static_cast<float>(delta) / WHEEL_DELTA * kWheelScroll * DpiScale();
+        UpdateView();
+    }
+    return TRUE;
+}
+
+void MainWindow::OnScroll(int bar, int code)
+{
+    const ViewLayout layout = ComputeLayout();
+    float& pan = bar == SB_HORZ ? m_panX : m_panY;
+    const float maxPan = bar == SB_HORZ ? layout.maxPanX : layout.maxPanY;
+
+    CRect rc;
+    GetClientRect(&rc);
+    const float page = static_cast<float>(bar == SB_HORZ ? rc.Width() : rc.Height());
+
+    switch (code)
+    {
+    case SB_LINELEFT:  // == SB_LINEUP
+        pan -= kScrollLine * DpiScale();
+        break;
+    case SB_LINERIGHT:  // == SB_LINEDOWN
+        pan += kScrollLine * DpiScale();
+        break;
+    case SB_PAGELEFT:  // == SB_PAGEUP
+        pan -= page;
+        break;
+    case SB_PAGERIGHT:  // == SB_PAGEDOWN
+        pan += page;
+        break;
+    case SB_LEFT:  // == SB_TOP
+        pan = 0.0f;
+        break;
+    case SB_RIGHT:  // == SB_BOTTOM
+        pan = maxPan;
+        break;
+    case SB_THUMBTRACK:
+    case SB_THUMBPOSITION:
+    {
+        // 32-bit position; the 16-bit pos parameter would truncate.
+        SCROLLINFO si{};
+        si.cbSize = sizeof(si);
+        si.fMask = SIF_TRACKPOS;
+        GetScrollInfo(bar, &si);
+        pan = static_cast<float>(si.nTrackPos);
+        break;
+    }
+    default:
+        return;
+    }
+    UpdateView();
+}
+
+void MainWindow::OnHScroll(int code, short /*pos*/, HWND /*scrollBar*/)
+{
+    OnScroll(SB_HORZ, code);
+}
+
+void MainWindow::OnVScroll(int code, short /*pos*/, HWND /*scrollBar*/)
+{
+    OnScroll(SB_VERT, code);
 }
 
 void MainWindow::OnDropFiles(HDROP drop)
@@ -183,6 +537,9 @@ LRESULT MainWindow::OnImageLoaded(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lPar
         m_cpuImage = std::move(result->image);
         m_bitmap.reset();  // recreated from m_cpuImage on next render
         m_state = ViewState::Loaded;
+        m_panX = 0.0f;
+        m_panY = 0.0f;
+        UpdateScrollBars();  // zoom mode carries over; ranges follow the new image
         SetWindowTextW((result->path.filename().wstring() + L" - "
                         + LoadStringResource(IDS_APP_TITLE)).c_str());
     }
@@ -216,6 +573,7 @@ void MainWindow::OnSize(UINT /*type*/, CSize size)
     {
         m_renderTarget->Resize(D2D1::SizeU(size.cx, size.cy));
     }
+    UpdateScrollBars();
 }
 
 void MainWindow::OnPaint(CDCHandle /*dc*/)
@@ -242,7 +600,7 @@ HRESULT MainWindow::CreateDeviceResources()
         CRect rc;
         GetClientRect(&rc);
         // Force 96 DPI so 1 DIP == 1 physical pixel; scaling is handled
-        // explicitly (fit rect now, dot-by-dot display later).
+        // explicitly through the view transform.
         RETURN_IF_FAILED(m_d2dFactory->CreateHwndRenderTarget(
             D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(),
                                          96.0f, 96.0f),
@@ -278,20 +636,6 @@ HRESULT MainWindow::CreateBitmapFromCpuImage()
         m_bitmap.put());
 }
 
-D2D1_RECT_F MainWindow::ComputeFitRect(D2D1_SIZE_F imageSize, D2D1_SIZE_F clientSize)
-{
-    // Shrink to fit while keeping the aspect ratio, never upscale, and center
-    // either way. Coordinates are DIPs, which equal physical pixels because
-    // the render target is created at 96 DPI.
-    const float scale = std::min({1.0f, clientSize.width / imageSize.width,
-                                  clientSize.height / imageSize.height});
-    const float width = imageSize.width * scale;
-    const float height = imageSize.height * scale;
-    const float left = (clientSize.width - width) / 2.0f;
-    const float top = (clientSize.height - height) / 2.0f;
-    return D2D1::RectF(left, top, left + width, top + height);
-}
-
 void MainWindow::Render()
 {
     if (FAILED(CreateDeviceResources()))
@@ -316,8 +660,11 @@ void MainWindow::Render()
     // status text overlays it, which avoids flicker when flipping quickly.
     if (m_bitmap)
     {
+        const ViewLayout layout = ComputeLayout();
         m_renderTarget->DrawBitmap(
-            m_bitmap.get(), ComputeFitRect(m_bitmap->GetSize(), m_renderTarget->GetSize()),
+            m_bitmap.get(),
+            D2D1::RectF(layout.destX, layout.destY, layout.destX + layout.displayWidth,
+                        layout.destY + layout.displayHeight),
             1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     }
     if (m_state == ViewState::Loading || m_state == ViewState::Error)
@@ -342,11 +689,11 @@ void MainWindow::DrawStatusText()
     const D2D1_SIZE_F size = m_renderTarget->GetSize();
 
     // Semi-transparent backplate keeps the text readable over any image.
-    constexpr float kHalfBandHeight = 24.0f;
+    const float halfBandHeight = 24.0f * DpiScale();
     m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::Black, 0.6f));
     m_renderTarget->FillRectangle(
-        D2D1::RectF(0.0f, size.height / 2.0f - kHalfBandHeight, size.width,
-                    size.height / 2.0f + kHalfBandHeight),
+        D2D1::RectF(0.0f, size.height / 2.0f - halfBandHeight, size.width,
+                    size.height / 2.0f + halfBandHeight),
         m_textBrush.get());
 
     m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
