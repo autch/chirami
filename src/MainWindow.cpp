@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "ImageTransform.h"
+#include "ResizeDialog.h"
 #include "resource.h"
 
 #include <shellapi.h>   // DragAcceptFiles, DragQueryFileW
@@ -404,7 +405,11 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
         }
         break;
     case 'R':
-        if (!control)
+        if (control)
+        {
+            ShowResizeDialog();
+        }
+        else
         {
             ApplyTransform(IDM_EDIT_ROTATE_CW);
         }
@@ -480,7 +485,7 @@ void MainWindow::OnInitMenuPopup(CMenuHandle menu, UINT /*index*/, BOOL sysMenu)
 
     const UINT imageState = MF_BYCOMMAND | (m_cpuImage ? MF_ENABLED : MF_GRAYED);
     menu.EnableMenuItem(IDM_FILE_SAVEAS, imageState);
-    for (UINT id = IDM_EDIT_ROTATE_CW; id <= IDM_EDIT_BLACKOUT; ++id)
+    for (UINT id = IDM_EDIT_ROTATE_CW; id <= IDM_EDIT_RESIZE; ++id)
     {
         menu.EnableMenuItem(id, imageState);
     }
@@ -817,6 +822,48 @@ try
 }
 CATCH_LOG()
 
+void MainWindow::ShowResizeDialog()
+{
+    if (!m_cpuImage)
+    {
+        return;
+    }
+    ExitSelectionMode();  // a selection would no longer match the pixels
+
+    ResizeDialog dialog(m_cpuImage.width, m_cpuImage.height);
+    if (dialog.DoModal(m_hWnd) != IDOK)
+    {
+        return;
+    }
+    const uint32_t width = dialog.ResultWidth();
+    const uint32_t height = dialog.ResultHeight();
+    if (width == m_cpuImage.width && height == m_cpuImage.height)
+    {
+        return;
+    }
+
+    // Fant-filtered rescale on the UI thread; even 8K completes fast enough
+    // for an explicit dialog-confirmed action.
+    LoadedImage resized;
+    const HRESULT hr = ResizeImage(m_wicFactory.get(), m_cpuImage, width, height, resized);
+    if (FAILED(hr))
+    {
+        const std::wstring text = std::format(L"{} (0x{:08X})", LoadStringResource(IDS_ERR_RESIZE),
+                                              static_cast<unsigned>(hr));
+        MessageBoxW(text.c_str(), LoadStringResource(IDS_APP_TITLE).c_str(),
+                    MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Baked like the other edits: transient until saved, kept out of the cache.
+    m_cpuImage = std::move(resized);
+    m_displayedPath.clear();
+    m_bitmap.reset();
+    ApplyAutoZoomForNewImage();
+    UpdateScrollBars();
+    Invalidate(FALSE);
+}
+
 void MainWindow::ShowAboutBox()
 {
     const std::wstring version = CHIRAMI_VERSION;
@@ -853,6 +900,12 @@ LRESULT MainWindow::OnEditCrop(WORD, WORD, HWND, BOOL&)
 LRESULT MainWindow::OnEditBlackout(WORD, WORD, HWND, BOOL&)
 {
     EnterSelectionMode(SelectionPurpose::Blackout);
+    return 0;
+}
+
+LRESULT MainWindow::OnEditResize(WORD, WORD, HWND, BOOL&)
+{
+    ShowResizeDialog();
     return 0;
 }
 
@@ -1075,16 +1128,38 @@ void MainWindow::ResizeWindowToClient(int clientWidth, int clientHeight)
 
     // Keep the whole window inside the work area, moving it as little as
     // possible from where the user put it.
-    CRect windowRect;
-    GetWindowRect(&windowRect);
-    const int x = std::clamp(static_cast<int>(windowRect.left), static_cast<int>(work.left),
-                             std::max(static_cast<int>(work.left),
-                                      static_cast<int>(work.right) - windowWidth));
-    const int y = std::clamp(static_cast<int>(windowRect.top), static_cast<int>(work.top),
-                             std::max(static_cast<int>(work.top),
-                                      static_cast<int>(work.bottom) - windowHeight));
+    const auto placeWindow = [&](int width, int height) {
+        CRect windowRect;
+        GetWindowRect(&windowRect);
+        const int x = std::clamp(static_cast<int>(windowRect.left), static_cast<int>(work.left),
+                                 std::max(static_cast<int>(work.left),
+                                          static_cast<int>(work.right) - width));
+        const int y = std::clamp(static_cast<int>(windowRect.top), static_cast<int>(work.top),
+                                 std::max(static_cast<int>(work.top),
+                                          static_cast<int>(work.bottom) - height));
+        SetWindowPos(nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+    };
+    placeWindow(windowWidth, windowHeight);
 
-    SetWindowPos(nullptr, x, y, windowWidth, windowHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+    // In a narrow window the menu bar can wrap onto several rows, which
+    // AdjustWindowRectEx cannot predict (it assumes one row). Measure the
+    // shortfall - ignoring any scrollbar that may have appeared meanwhile -
+    // and grow the window once; the width doesn't change, so neither does
+    // the wrapping.
+    CRect client;
+    GetClientRect(&client);
+    int actualHeight = client.Height();
+    if (GetStyle() & WS_HSCROLL)
+    {
+        actualHeight += GetSystemMetricsForDpi(SM_CYHSCROLL, m_dpi);
+    }
+    const int shortfall = clientHeight - actualHeight;
+    if (shortfall > 0)
+    {
+        windowHeight =
+            std::min(windowHeight + shortfall, static_cast<int>(work.bottom - work.top));
+        placeWindow(windowWidth, windowHeight);
+    }
 }
 
 void MainWindow::ToggleFullscreen()
@@ -1271,11 +1346,32 @@ void MainWindow::UpdateView()
 
 void MainWindow::ApplyZoom(float newScale, CPoint anchor)
 {
-    newScale = std::clamp(newScale, kMinZoom, kMaxZoom);
     const ViewLayout layout = ComputeLayout();
-    if (layout.scale <= 0.0f || newScale == layout.scale)
+    if (layout.scale <= 0.0f)
     {
         return;
+    }
+    const bool zoomingOut = newScale < layout.scale;
+    newScale = std::clamp(newScale, kMinZoom, kMaxZoom);
+    if (newScale == layout.scale)
+    {
+        MessageBeep(MB_OK);  // already at the zoom limit
+        return;
+    }
+    if (zoomingOut)
+    {
+        // Refuse to keep zooming out once there is no room left to draw:
+        // the client area may be gone entirely (minimum window size plus a
+        // wrapped menu bar) or the image would shrink below a pixel.
+        CRect rc;
+        GetClientRect(&rc);
+        const long newWidth = std::lround(m_cpuImage.width * newScale);
+        const long newHeight = std::lround(m_cpuImage.height * newScale);
+        if (rc.Width() <= 0 || rc.Height() <= 0 || newWidth < 1 || newHeight < 1)
+        {
+            MessageBeep(MB_OK);
+            return;
+        }
     }
 
     // Keep the image point under `anchor` stationary on screen.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "framework.h"
 #include "LoadedImage.h"
 
 // CPU-side pixel transforms. They bake the change into the pixels so the
@@ -14,3 +15,7 @@ void FlipImageVertical(LoadedImage& image);
 LoadedImage CropImage(const LoadedImage& source, uint32_t x, uint32_t y, uint32_t width,
                       uint32_t height);
 void FillRectBlack(LoadedImage& image, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+
+// Rescales through the WIC Fant scaler. Caller validates the dimensions.
+HRESULT ResizeImage(IWICImagingFactory* factory, const LoadedImage& source, uint32_t width,
+                    uint32_t height, LoadedImage& out) noexcept;

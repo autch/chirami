@@ -16,8 +16,16 @@
 #define IDS_FILTER_BMP          113
 #define IDS_FILTER_TIFF         114
 #define IDS_ERR_NO_IMAGES       115
+#define IDS_ERR_RESIZE          116
 
 #define IDR_MAINMENU            200
+
+#define IDD_RESIZE              300
+#define IDC_RESIZE_WIDTH        1001
+#define IDC_RESIZE_HEIGHT       1002
+#define IDC_RESIZE_KEEPASPECT   1003
+#define IDC_RESIZE_WIDTH_PCT    1004
+#define IDC_RESIZE_HEIGHT_PCT   1005
 
 #define IDM_FILE_OPEN           40001
 #define IDM_FILE_EXIT           40002
@@ -35,6 +43,7 @@
 #define IDM_EDIT_FLIP_V         40305
 #define IDM_EDIT_CROP           40306
 #define IDM_EDIT_BLACKOUT       40307
+#define IDM_EDIT_RESIZE         40308
 #define IDM_SORT_NAME           40401
 #define IDM_SORT_DATE           40402
 #define IDM_SORT_SIZE           40403

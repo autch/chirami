@@ -22,6 +22,27 @@ BEGIN
     IDS_FILTER_BMP           L"BMP 画像"
     IDS_FILTER_TIFF          L"TIFF 画像"
     IDS_ERR_NO_IMAGES        L"表示できる画像がありません"
+    IDS_ERR_RESIZE           L"リサイズできません"
+END
+
+IDD_RESIZE DIALOGEX 0, 0, 216, 78
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "リサイズ"
+FONT 9, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    LTEXT           "幅(&W):",              -1, 8, 10, 40, 8
+    EDITTEXT        IDC_RESIZE_WIDTH,           50, 8, 44, 13, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "px",                   -1, 97, 10, 12, 8
+    EDITTEXT        IDC_RESIZE_WIDTH_PCT,       118, 8, 36, 13, ES_AUTOHSCROLL
+    LTEXT           "%",                    -1, 157, 10, 10, 8
+    LTEXT           "高さ(&H):",            -1, 8, 27, 40, 8
+    EDITTEXT        IDC_RESIZE_HEIGHT,          50, 25, 44, 13, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "px",                   -1, 97, 27, 12, 8
+    EDITTEXT        IDC_RESIZE_HEIGHT_PCT,      118, 25, 36, 13, ES_AUTOHSCROLL
+    LTEXT           "%",                    -1, 157, 27, 10, 8
+    AUTOCHECKBOX    "縦横比を維持(&K)",     IDC_RESIZE_KEEPASPECT, 8, 44, 130, 10
+    DEFPUSHBUTTON   "OK",                   IDOK, 104, 60, 50, 14
+    PUSHBUTTON      "キャンセル",           IDCANCEL, 158, 60, 50, 14
 END
 
 IDR_MAINMENU MENU
@@ -44,6 +65,8 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "クロップ(&C)\tC",               IDM_EDIT_CROP
         MENUITEM "黒塗り(&B)\tB",                 IDM_EDIT_BLACKOUT
+        MENUITEM SEPARATOR
+        MENUITEM "リサイズ(&S)...\tCtrl+R",       IDM_EDIT_RESIZE
     END
     POPUP "表示(&V)"
     BEGIN
@@ -90,6 +113,27 @@ BEGIN
     IDS_FILTER_BMP           L"BMP image"
     IDS_FILTER_TIFF          L"TIFF image"
     IDS_ERR_NO_IMAGES        L"No displayable images in this folder"
+    IDS_ERR_RESIZE           L"Cannot resize image"
+END
+
+IDD_RESIZE DIALOGEX 0, 0, 216, 78
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Resize"
+FONT 9, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    LTEXT           "&Width:",              -1, 8, 10, 40, 8
+    EDITTEXT        IDC_RESIZE_WIDTH,           50, 8, 44, 13, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "px",                   -1, 97, 10, 12, 8
+    EDITTEXT        IDC_RESIZE_WIDTH_PCT,       118, 8, 36, 13, ES_AUTOHSCROLL
+    LTEXT           "%",                    -1, 157, 10, 10, 8
+    LTEXT           "&Height:",             -1, 8, 27, 40, 8
+    EDITTEXT        IDC_RESIZE_HEIGHT,          50, 25, 44, 13, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "px",                   -1, 97, 27, 12, 8
+    EDITTEXT        IDC_RESIZE_HEIGHT_PCT,      118, 25, 36, 13, ES_AUTOHSCROLL
+    LTEXT           "%",                    -1, 157, 27, 10, 8
+    AUTOCHECKBOX    "&Keep aspect ratio",   IDC_RESIZE_KEEPASPECT, 8, 44, 130, 10
+    DEFPUSHBUTTON   "OK",                   IDOK, 104, 60, 50, 14
+    PUSHBUTTON      "Cancel",               IDCANCEL, 158, 60, 50, 14
 END
 
 IDR_MAINMENU MENU
@@ -112,6 +156,8 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "&Crop\tC",                      IDM_EDIT_CROP
         MENUITEM "&Black Out\tB",                 IDM_EDIT_BLACKOUT
+        MENUITEM SEPARATOR
+        MENUITEM "Re&size...\tCtrl+R",            IDM_EDIT_RESIZE
     END
     POPUP "&View"
     BEGIN

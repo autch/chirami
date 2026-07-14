@@ -53,6 +53,7 @@ public:
         COMMAND_ID_HANDLER(IDM_EDIT_PASTE, OnEditPaste)
         COMMAND_ID_HANDLER(IDM_EDIT_CROP, OnEditCrop)
         COMMAND_ID_HANDLER(IDM_EDIT_BLACKOUT, OnEditBlackout)
+        COMMAND_ID_HANDLER(IDM_EDIT_RESIZE, OnEditResize)
         COMMAND_RANGE_HANDLER(IDM_EDIT_ROTATE_CW, IDM_EDIT_FLIP_V, OnEditTransform)
         COMMAND_RANGE_HANDLER(IDM_SORT_NAME, IDM_SORT_DESC, OnSortChanged)
         COMMAND_ID_HANDLER(IDM_VIEW_FIT, OnViewFit)
@@ -119,6 +120,7 @@ private:
     LRESULT OnEditPaste(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnEditCrop(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnEditBlackout(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnEditResize(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnEditTransform(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnSortChanged(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnSaveDone(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
@@ -251,6 +253,7 @@ private:
 
     void ShowFileOpenDialog();
     void ShowFileSaveDialog();
+    void ShowResizeDialog();
     void ShowAboutBox();
     void StepZoomAtCenter(int direction);
     void PasteFromClipboard();
