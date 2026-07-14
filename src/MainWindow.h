@@ -138,6 +138,8 @@ private:
     void OpenFolder(std::filesystem::path folder);
     void ToggleFullscreen();
     void ApplyAutoZoomForNewImage();
+    void AutoFitWindowAfterZoom();
+    void ResizeWindowToClient(int clientWidth, int clientHeight);
 
     ViewLayout ComputeLayout();
     void UpdateScrollBars();

@@ -1001,8 +1001,75 @@ void MainWindow::ApplyAutoZoomForNewImage()
         clientHeight = static_cast<int>(std::round(imageHeight * scale));
     }
 
-    int windowWidth = clientWidth + chromeWidth;
-    int windowHeight = clientHeight + chromeHeight;
+    ResizeWindowToClient(clientWidth, clientHeight);
+}
+
+// After a zoom, size the window to the zoomed image: shrink-wrapped while it
+// fits the work area, and grown to the largest size the work area allows
+// (eventually covering it) with scrollbars once it doesn't.
+void MainWindow::AutoFitWindowAfterZoom()
+{
+    if (!m_cpuImage || m_fullscreen || IsZoomed() || m_zoomMode == ZoomMode::Fit)
+    {
+        return;  // fit mode tracks the window by definition
+    }
+
+    const float scale = m_zoomMode == ZoomMode::ActualSize ? 1.0f : m_zoomScale;
+    const int displayWidth =
+        static_cast<int>(std::lround(static_cast<float>(m_cpuImage.width) * scale));
+    const int displayHeight =
+        static_cast<int>(std::lround(static_cast<float>(m_cpuImage.height) * scale));
+
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    GetMonitorInfoW(MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST), &monitor);
+    RECT frame{};
+    AdjustWindowRectExForDpi(&frame, GetStyle() & ~(WS_HSCROLL | WS_VSCROLL),
+                             GetMenu() != nullptr, GetExStyle(), m_dpi);
+    const int maxClientWidth =
+        (monitor.rcWork.right - monitor.rcWork.left) - (frame.right - frame.left);
+    const int maxClientHeight =
+        (monitor.rcWork.bottom - monitor.rcWork.top) - (frame.bottom - frame.top);
+    const int barWidth = GetSystemMetricsForDpi(SM_CXVSCROLL, m_dpi);
+    const int barHeight = GetSystemMetricsForDpi(SM_CYHSCROLL, m_dpi);
+
+    // Which axes will overflow and need a scrollbar? A bar on one axis
+    // steals viewport space from the other, hence the two passes.
+    bool needH = false;
+    bool needV = false;
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        needH = displayWidth > maxClientWidth - (needV ? barWidth : 0);
+        needV = displayHeight > maxClientHeight - (needH ? barHeight : 0);
+    }
+
+    // Per axis: the viewport is the display size or whatever the work area
+    // allows, plus the room the scrollbar itself takes.
+    const int clientWidth =
+        std::min(displayWidth, maxClientWidth - (needV ? barWidth : 0))
+        + (needV ? barWidth : 0);
+    const int clientHeight =
+        std::min(displayHeight, maxClientHeight - (needH ? barHeight : 0))
+        + (needH ? barHeight : 0);
+    ResizeWindowToClient(clientWidth, clientHeight);
+}
+
+// Resizes the window so the client area (without scrollbars) has the given
+// size, keeping the top-left corner as stationary as the work area allows
+// and respecting the minimum tracking size.
+void MainWindow::ResizeWindowToClient(int clientWidth, int clientHeight)
+{
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    GetMonitorInfoW(MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST), &monitor);
+    const RECT& work = monitor.rcWork;
+
+    RECT frame{};
+    AdjustWindowRectExForDpi(&frame, GetStyle() & ~(WS_HSCROLL | WS_VSCROLL),
+                             GetMenu() != nullptr, GetExStyle(), m_dpi);
+
+    int windowWidth = clientWidth + (frame.right - frame.left);
+    int windowHeight = clientHeight + (frame.bottom - frame.top);
     windowWidth = std::max(windowWidth, GetSystemMetricsForDpi(SM_CXMINTRACK, m_dpi));
     windowHeight = std::max(windowHeight, GetSystemMetricsForDpi(SM_CYMINTRACK, m_dpi));
 
@@ -1078,8 +1145,12 @@ MainWindow::ViewLayout MainWindow::ComputeLayout()
         break;
     }
 
-    layout.displayWidth = imageWidth * layout.scale;
-    layout.displayHeight = imageHeight * layout.scale;
+    // Rounded to whole pixels so layout, scrollbar visibility, and the
+    // window auto-fit all agree; raw float products carry rounding noise
+    // (e.g. 640.00001) that would spuriously overflow an exactly-fitting
+    // client area.
+    layout.displayWidth = std::round(imageWidth * layout.scale);
+    layout.displayHeight = std::round(imageHeight * layout.scale);
     layout.maxPanX = std::max(0.0f, layout.displayWidth - clientWidth);
     layout.maxPanY = std::max(0.0f, layout.displayHeight - clientHeight);
 
@@ -1108,16 +1179,18 @@ void MainWindow::UpdateScrollBars()
 
     bool needH = false;
     bool needV = false;
-    float displayWidth = 0.0f;
-    float displayHeight = 0.0f;
+    int displayWidth = 0;
+    int displayHeight = 0;
 
     // Fit mode never overflows the client area, so bars stay hidden.
     // Fullscreen suppresses them entirely; drag/wheel panning still works.
     if (m_cpuImage && m_zoomMode != ZoomMode::Fit && !m_fullscreen)
     {
         const float scale = m_zoomMode == ZoomMode::ActualSize ? 1.0f : m_zoomScale;
-        displayWidth = static_cast<float>(m_cpuImage.width) * scale;
-        displayHeight = static_cast<float>(m_cpuImage.height) * scale;
+        // Whole pixels, same rounding as ComputeLayout/ResizeWindowToClient,
+        // so an exactly-fitting window never shows bars from float noise.
+        displayWidth = static_cast<int>(std::lround(m_cpuImage.width * scale));
+        displayHeight = static_cast<int>(std::lround(m_cpuImage.height * scale));
 
         // Decide visibility against the bar-less ("gross") client size; each
         // bar that becomes visible steals space, which can force the other
@@ -1131,8 +1204,8 @@ void MainWindow::UpdateScrollBars()
         const int grossHeight = rc.Height() + ((style & WS_HSCROLL) ? barHeight : 0);
         for (int pass = 0; pass < 2; ++pass)
         {
-            const float availWidth = static_cast<float>(grossWidth - (needV ? barWidth : 0));
-            const float availHeight = static_cast<float>(grossHeight - (needH ? barHeight : 0));
+            const int availWidth = grossWidth - (needV ? barWidth : 0);
+            const int availHeight = grossHeight - (needH ? barHeight : 0);
             needH = displayWidth > availWidth;
             needV = displayHeight > availHeight;
         }
@@ -1214,6 +1287,7 @@ void MainWindow::ApplyZoom(float newScale, CPoint anchor)
     m_panX = imageX * newScale - static_cast<float>(anchor.x);
     m_panY = imageY * newScale - static_cast<float>(anchor.y);
 
+    AutoFitWindowAfterZoom();
     UpdateScrollBars();
     UpdateView();
 }
@@ -1235,6 +1309,7 @@ void MainWindow::SetZoomMode(ZoomMode mode)
         return;
     }
     m_zoomMode = mode;
+    AutoFitWindowAfterZoom();
     UpdateScrollBars();
 
     // Start centered when the new mode overflows the client area.
