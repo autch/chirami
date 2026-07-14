@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 #include "resource.h"
 
+#include <shellapi.h>  // DragAcceptFiles, DragQueryFileW
+
 #include <algorithm>
 #include <format>
 
@@ -43,15 +45,123 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
     THROW_IF_FAILED(m_textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER));
 
     m_loader = std::make_unique<ImageLoader>(m_hWnd, WM_APP_IMAGE_LOADED);
+    m_scanner = std::make_unique<FolderScanner>(m_hWnd, WM_APP_FOLDER_SCANNED);
+
+    DragAcceptFiles(TRUE);
     return 0;
 }
 
 void MainWindow::LoadFile(std::filesystem::path path)
 {
-    m_expectedGeneration = m_loader->RequestLoad(std::move(path));
+    // Purely lexical (cwd-based); safe even for paths on slow shares.
+    std::error_code ec;
+    if (auto absolute = std::filesystem::absolute(path, ec); !ec)
+    {
+        path = std::move(absolute);
+    }
+
+    m_currentPath = std::move(path);
+    m_expectedGeneration = m_loader->RequestLoad(m_currentPath);
     m_state = ViewState::Loading;
     m_statusText = LoadStringResource(IDS_STATUS_LOADING);
+    m_edgeWarned = false;
+
+    if (auto folder = m_currentPath.parent_path(); folder != m_currentFolder)
+    {
+        m_currentFolder = std::move(folder);
+        m_folderFiles.clear();
+        m_currentIndex = -1;
+        m_expectedScanGeneration = m_scanner->RequestScan(m_currentFolder);
+    }
+    else if (!m_folderFiles.empty())
+    {
+        m_currentIndex = FindFolderIndex(m_currentPath);
+    }
+
     Invalidate(FALSE);
+}
+
+void MainWindow::NavigateBy(int delta)
+{
+    if (m_folderFiles.empty())
+    {
+        return;  // no scan result yet (or nothing decodable in the folder)
+    }
+    const ptrdiff_t last = static_cast<ptrdiff_t>(m_folderFiles.size()) - 1;
+    ptrdiff_t target;
+    if (m_currentIndex < 0)
+    {
+        target = delta > 0 ? 0 : last;
+    }
+    else
+    {
+        target = m_currentIndex + delta;
+        if (target < 0 || target > last)
+        {
+            // Past the edge: beep once as a warning, wrap around to the
+            // other end on the next attempt. (Wrap behavior will become
+            // configurable later.)
+            if (!m_edgeWarned)
+            {
+                MessageBeep(MB_OK);
+                m_edgeWarned = true;
+                return;
+            }
+            target = target < 0 ? last : 0;
+        }
+    }
+    if (target == m_currentIndex)
+    {
+        return;  // e.g. wrapping in a single-file folder
+    }
+    m_currentIndex = target;
+    LoadFile(m_folderFiles[static_cast<size_t>(target)]);
+}
+
+ptrdiff_t MainWindow::FindFolderIndex(const std::filesystem::path& path) const
+{
+    for (size_t i = 0; i < m_folderFiles.size(); ++i)
+    {
+        if (_wcsicmp(m_folderFiles[i].c_str(), path.c_str()) == 0)
+        {
+            return static_cast<ptrdiff_t>(i);
+        }
+    }
+    return -1;
+}
+
+void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
+{
+    switch (key)
+    {
+    case VK_LEFT:
+        NavigateBy(-1);
+        break;
+    case VK_RIGHT:
+        NavigateBy(+1);
+        break;
+    default:
+        break;
+    }
+}
+
+void MainWindow::OnDropFiles(HDROP drop)
+{
+    auto cleanup = wil::scope_exit([&] { DragFinish(drop); });
+
+    const UINT length = DragQueryFileW(drop, 0, nullptr, 0);
+    if (length == 0)
+    {
+        return;
+    }
+    std::wstring path(length + 1, L'\0');
+    if (DragQueryFileW(drop, 0, path.data(), length + 1) == 0)
+    {
+        return;
+    }
+    path.resize(length);
+    SetForegroundWindow(m_hWnd);
+    LoadFile(std::filesystem::path(std::move(path)));
 }
 
 LRESULT MainWindow::OnImageLoaded(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
@@ -65,8 +175,7 @@ LRESULT MainWindow::OnImageLoaded(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lPar
 
     if (FAILED(result->hr))
     {
-        m_cpuImage = {};
-        m_bitmap.reset();
+        // Keep the previous image (if any); the message overlays it.
         SetStatusError(result->hr);
     }
     else
@@ -78,6 +187,19 @@ LRESULT MainWindow::OnImageLoaded(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lPar
                         + LoadStringResource(IDS_APP_TITLE)).c_str());
     }
     Invalidate(FALSE);
+    return 0;
+}
+
+LRESULT MainWindow::OnFolderScanned(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                    BOOL& /*handled*/)
+{
+    auto result = m_scanner->TakeResult();
+    if (!result || result->generation != m_expectedScanGeneration)
+    {
+        return 0;  // stale scan; a newer one is on its way
+    }
+    m_folderFiles = std::move(result->files);
+    m_currentIndex = FindFolderIndex(m_currentPath);
     return 0;
 }
 
@@ -106,7 +228,9 @@ void MainWindow::OnPaint(CDCHandle /*dc*/)
 
 void MainWindow::OnDestroy()
 {
-    m_loader.reset();  // stop and join the worker before the window goes away
+    // Stop and join the workers before the window goes away.
+    m_loader.reset();
+    m_scanner.reset();
     DiscardDeviceResources();
     PostQuitMessage(0);
 }
@@ -188,22 +312,17 @@ void MainWindow::Render()
     m_renderTarget->BeginDraw();
     m_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
 
-    switch (m_state)
+    // The previous image stays up while the next one loads (or fails); the
+    // status text overlays it, which avoids flicker when flipping quickly.
+    if (m_bitmap)
     {
-    case ViewState::Loaded:
-        if (m_bitmap)
-        {
-            m_renderTarget->DrawBitmap(
-                m_bitmap.get(), ComputeFitRect(m_bitmap->GetSize(), m_renderTarget->GetSize()),
-                1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-        }
-        break;
-    case ViewState::Loading:
-    case ViewState::Error:
+        m_renderTarget->DrawBitmap(
+            m_bitmap.get(), ComputeFitRect(m_bitmap->GetSize(), m_renderTarget->GetSize()),
+            1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+    }
+    if (m_state == ViewState::Loading || m_state == ViewState::Error)
+    {
         DrawStatusText();
-        break;
-    case ViewState::Empty:
-        break;
     }
 
     const HRESULT hr = m_renderTarget->EndDraw();
@@ -221,6 +340,16 @@ void MainWindow::DrawStatusText()
         return;
     }
     const D2D1_SIZE_F size = m_renderTarget->GetSize();
+
+    // Semi-transparent backplate keeps the text readable over any image.
+    constexpr float kHalfBandHeight = 24.0f;
+    m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::Black, 0.6f));
+    m_renderTarget->FillRectangle(
+        D2D1::RectF(0.0f, size.height / 2.0f - kHalfBandHeight, size.width,
+                    size.height / 2.0f + kHalfBandHeight),
+        m_textBrush.get());
+
+    m_textBrush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
     m_renderTarget->DrawText(m_statusText.c_str(), static_cast<UINT32>(m_statusText.size()),
                              m_textFormat.get(), D2D1::RectF(0.0f, 0.0f, size.width, size.height),
                              m_textBrush.get());

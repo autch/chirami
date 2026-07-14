@@ -18,6 +18,7 @@ add_executable(chirami WIN32
     src/main.cpp
     src/MainWindow.cpp
     src/ImageLoader.cpp
+    src/FolderScanner.cpp
     src/chirami.rc
     src/chirami.manifest
 )
