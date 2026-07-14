@@ -18,14 +18,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The preinstalled C:\vcpkg is a shallow clone, so the pinned
-      # builtin-baseline commit from vcpkg.json is not in its history and
-      # version resolution fails. Fetch that commit explicitly.
-      - name: Fetch vcpkg baseline commit
+      # The preinstalled C:\vcpkg is a shallow clone whose checkout may be
+      # older than the pinned builtin-baseline. baseline.json is read from
+      # the baseline commit via git, but the versions database and ports are
+      # read from the working tree, so fetch the commit AND move the
+      # checkout onto it - otherwise ports newer than the image (e.g.
+      # libjpeg-turbo 3.2.0) resolve to "no version database entry".
+      - name: Pin vcpkg to the manifest baseline
         shell: pwsh
         run: |
           $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
           git -C $env:VCPKG_INSTALLATION_ROOT fetch --depth 1 origin $baseline
+          git -C $env:VCPKG_INSTALLATION_ROOT checkout --force $baseline
 
       - name: Configure and build (Release)
         shell: cmd
