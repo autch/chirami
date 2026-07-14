@@ -1,0 +1,47 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # windows-latest is Windows Server 2025 with Visual Studio 2026,
+    # matching the local development environment (MSVC v145, C++20).
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure and build (Release)
+        shell: cmd
+        run: |
+          rem Locate the latest Visual Studio with the C++ toolset via vswhere
+          rem instead of hardcoding an edition/version path.
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
+          if not defined VSPATH (echo Visual Studio with C++ tools not found & exit /b 1)
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+          rem CMakePresets.json expects VCPKG_ROOT; the runner image provides
+          rem a preinstalled vcpkg via VCPKG_INSTALLATION_ROOT.
+          set "VCPKG_ROOT=%VCPKG_INSTALLATION_ROOT%"
+          cmake --preset release
+          if errorlevel 1 exit /b 1
+          cmake --build --preset release
+
+      - name: Stage artifact contents
+        shell: cmd
+        run: |
+          mkdir dist
+          copy build\release\chirami.exe dist\
+          copy README.md dist\
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chirami-win64
+          path: dist/
+          if-no-files-found: error
