@@ -6,13 +6,21 @@
 LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
 STRINGTABLE
 BEGIN
-    IDS_APP_TITLE    L"chirami"
+    IDS_APP_TITLE            L"chirami"
+    IDS_STATUS_LOADING       L"読み込み中..."
+    IDS_ERR_FILE_OPEN        L"ファイルを開けません"
+    IDS_ERR_DECODE           L"画像をデコードできません"
+    IDS_ERR_IMAGE_TOO_LARGE  L"画像が大きすぎます"
 END
 
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 STRINGTABLE
 BEGIN
-    IDS_APP_TITLE    L"chirami"
+    IDS_APP_TITLE            L"chirami"
+    IDS_STATUS_LOADING       L"Loading..."
+    IDS_ERR_FILE_OPEN        L"Cannot open file"
+    IDS_ERR_DECODE           L"Cannot decode image"
+    IDS_ERR_IMAGE_TOO_LARGE  L"Image is too large"
 END
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL

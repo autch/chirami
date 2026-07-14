@@ -17,6 +17,7 @@ find_path(WTL_INCLUDE_DIR atlapp.h REQUIRED)
 add_executable(chirami WIN32
     src/main.cpp
     src/MainWindow.cpp
+    src/ImageLoader.cpp
     src/chirami.rc
     src/chirami.manifest
 )
@@ -31,7 +32,10 @@ target_compile_definitions(chirami PRIVATE
 target_link_libraries(chirami PRIVATE
     WIL::WIL
     d2d1
+    dwrite
     windowscodecs
+    shlwapi
+    shell32
 )
 
 target_compile_options(chirami PRIVATE

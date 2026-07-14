@@ -2,6 +2,8 @@
 #include "MainWindow.h"
 #include "resource.h"
 
+#include <shellapi.h>  // CommandLineToArgvW
+
 CAppModule _Module;
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR /*cmdLine*/, int cmdShow)
@@ -27,6 +29,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR /*cmdLine*/, int cmdS
     }
     wnd.ShowWindow(cmdShow);
     wnd.UpdateWindow();
+
+    int argc = 0;
+    wil::unique_hlocal_ptr<LPWSTR> argv(CommandLineToArgvW(GetCommandLineW(), &argc));
+    if (argv && argc >= 2)
+    {
+        wnd.LoadFile(argv.get()[1]);
+    }
 
     return msgLoop.Run();
 }

@@ -16,6 +16,7 @@ extern CAppModule _Module;
 #include <atlcrack.h>
 
 #include <d2d1.h>
+#include <dwrite.h>
 #include <wincodec.h>
 
 #include <wil/com.h>
