@@ -454,12 +454,17 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
         }
         break;
     case VK_F11:
+    case VK_RETURN:
         ToggleFullscreen();
         break;
     case VK_ESCAPE:
         if (m_fullscreen)
         {
             ToggleFullscreen();
+        }
+        else
+        {
+            PostMessage(WM_CLOSE);
         }
         break;
     default:
@@ -1508,6 +1513,9 @@ void MainWindow::OnLButtonDown(UINT /*flags*/, CPoint point)
         m_dragging = true;
         m_dragLast = point;
         SetCapture();
+        // WM_SETCURSOR is suppressed while the mouse is captured, so switch
+        // the cursor here rather than waiting for OnSetCursor.
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
     }
 }
 
@@ -1595,6 +1603,7 @@ void MainWindow::OnLButtonUp(UINT /*flags*/, CPoint /*point*/)
     {
         m_dragging = false;
         ReleaseCapture();
+        SetCursor(LoadCursorW(nullptr, IDC_ARROW));
     }
 }
 
@@ -1607,6 +1616,13 @@ void MainWindow::OnCaptureChanged(HWND /*newCapture*/)
 
 BOOL MainWindow::OnSetCursor(CWindow /*window*/, UINT hitTest, UINT /*message*/)
 {
+    // While a captured pan drag is active the cursor may leave the client
+    // area; keep the hand shape regardless of the hit-test code.
+    if (m_dragging)
+    {
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        return TRUE;
+    }
     if (hitTest == HTCLIENT && InSelectionMode() && m_cpuImage)
     {
         CPoint point;

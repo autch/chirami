@@ -46,7 +46,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 | Ctrl + ホイール / wheel | カーソル位置を中心にズーム / zoom anchored at the cursor |
 | ホイール / wheel | 縦スクロール / vertical scroll |
 | 左ドラッグ / left drag | パン（表示がウィンドウより大きいとき） / pan (when the image overflows the window) |
-| F11 | フルスクリーン切り替え / toggle fullscreen |
+| Enter または F11 / Enter or F11 | フルスクリーン切り替え / toggle fullscreen |
 | Ctrl + O | ファイルを開く / open a file |
 | Ctrl + S | 名前を付けて保存（形式変換） / save as (format conversion) |
 | Ctrl + V | クリップボードから貼り付け / paste from the clipboard |
@@ -55,7 +55,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 | C / B | クロップ / 黒塗りの範囲選択を開始 / start crop / blackout selection |
 | Ctrl + R | リサイズ（ピクセル / % 指定） / resize (pixel / percent dialog) |
 | Enter または選択内ダブルクリック / Enter or double-click inside | 選択を適用 / apply the selection |
-| Esc | 範囲選択の解除、またはフルスクリーン解除 / cancel the selection, or leave fullscreen |
+| Esc | 範囲選択の解除、フルスクリーン解除、または終了 / cancel the selection, leave fullscreen, or quit |
 | ドラッグ＆ドロップ / drop a file or folder | ファイルまたはフォルダを開く / open the dropped file or folder |
 
 ## ビルド / Building
