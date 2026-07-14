@@ -157,7 +157,7 @@ private:
 
     HRESULT CreateDeviceResources();
     void DiscardDeviceResources();
-    HRESULT CreateBitmapFromCpuImage();
+    HRESULT CreateTilesFromCpuImage();
     void Render();
     void DrawStatusText();
     void SetStatusError(HRESULT hr);
@@ -168,10 +168,20 @@ private:
     wil::com_ptr<IDWriteFactory> m_dwriteFactory;
     wil::com_ptr<IDWriteTextFormat> m_textFormat;
 
+    // A piece of the displayed image on the GPU. Images beyond the GPU's
+    // maximum bitmap size are split into tiles; each tile carries a 1px
+    // gutter of neighboring pixels so linear sampling never shows seams.
+    struct ImageTile
+    {
+        D2D1_RECT_F source;      // image region this tile displays
+        D2D1_RECT_F withGutter;  // image region the bitmap actually holds
+        wil::com_ptr<ID2D1Bitmap> bitmap;
+    };
+
     // Device-dependent resources (recreated after D2DERR_RECREATE_TARGET)
     wil::com_ptr<ID2D1HwndRenderTarget> m_renderTarget;
     wil::com_ptr<ID2D1SolidColorBrush> m_textBrush;
-    wil::com_ptr<ID2D1Bitmap> m_bitmap;
+    std::vector<ImageTile> m_tiles;
 
     std::unique_ptr<ImageLoader> m_loader;
     std::unique_ptr<FolderScanner> m_scanner;

@@ -208,7 +208,7 @@ void MainWindow::DisplayImage(const std::wstring& displayName, LoadedImage image
     m_displayedPath = m_currentPath;
 
     m_cpuImage = std::move(image);
-    m_bitmap.reset();  // recreated from m_cpuImage on next render
+    m_tiles.clear();  // recreated from m_cpuImage on next render
     m_state = ViewState::Loaded;
     m_panX = 0.0f;
     m_panY = 0.0f;
@@ -577,7 +577,7 @@ void MainWindow::ApplySelection()
     // Baked into the pixels like rotate/flip: transient until saved, so the
     // on-disk identity is dropped and the result stays out of the cache.
     m_displayedPath.clear();
-    m_bitmap.reset();
+    m_tiles.clear();
 
     if (m_selectionPurpose == SelectionPurpose::Crop)
     {
@@ -633,7 +633,7 @@ void MainWindow::ApplyTransform(WORD commandId)
     // Edits are transient until saved; drop the on-disk identity so the
     // edited pixels never enter the prefetch cache.
     m_displayedPath.clear();
-    m_bitmap.reset();
+    m_tiles.clear();
     ApplyAutoZoomForNewImage();  // dimensions may have swapped
     UpdateScrollBars();
     Invalidate(FALSE);
@@ -858,7 +858,7 @@ void MainWindow::ShowResizeDialog()
     // Baked like the other edits: transient until saved, kept out of the cache.
     m_cpuImage = std::move(resized);
     m_displayedPath.clear();
-    m_bitmap.reset();
+    m_tiles.clear();
     ApplyAutoZoomForNewImage();
     UpdateScrollBars();
     Invalidate(FALSE);
@@ -1804,22 +1804,60 @@ HRESULT MainWindow::CreateDeviceResources()
 
 void MainWindow::DiscardDeviceResources()
 {
-    m_bitmap.reset();
+    m_tiles.clear();
     m_textBrush.reset();
     m_renderTarget.reset();
 }
 
-HRESULT MainWindow::CreateBitmapFromCpuImage()
+HRESULT MainWindow::CreateTilesFromCpuImage()
 {
-    const UINT32 maxSize = m_renderTarget->GetMaximumBitmapSize();
-    RETURN_HR_IF(kHrImageTooLarge, m_cpuImage.width > maxSize || m_cpuImage.height > maxSize);
+    m_tiles.clear();
 
-    return m_renderTarget->CreateBitmap(
-        D2D1::SizeU(m_cpuImage.width, m_cpuImage.height), m_cpuImage.pixels.data(),
-        m_cpuImage.stride,
-        D2D1::BitmapProperties(
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)),
-        m_bitmap.put());
+    // Images beyond the GPU's maximum bitmap size are split into tiles.
+    // 8192 keeps individual allocations moderate on any modern GPU.
+    const uint32_t tileEdge = std::min(m_renderTarget->GetMaximumBitmapSize(), 8192u);
+    RETURN_HR_IF(kHrImageTooLarge, tileEdge == 0);
+
+    const auto properties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+
+    for (uint32_t y = 0; y < m_cpuImage.height; y += tileEdge)
+    {
+        for (uint32_t x = 0; x < m_cpuImage.width; x += tileEdge)
+        {
+            const uint32_t width = std::min(tileEdge, m_cpuImage.width - x);
+            const uint32_t height = std::min(tileEdge, m_cpuImage.height - y);
+
+            // 1px gutter of neighboring pixels (clamped to the image) so
+            // linear sampling at the tile edges blends with real data
+            // instead of clamping - otherwise the seams show when scaled.
+            const uint32_t gutterLeft = x > 0 ? x - 1 : x;
+            const uint32_t gutterTop = y > 0 ? y - 1 : y;
+            const uint32_t gutterRight = std::min(m_cpuImage.width, x + width + 1);
+            const uint32_t gutterBottom = std::min(m_cpuImage.height, y + height + 1);
+
+            ImageTile tile;
+            tile.source = D2D1::RectF(static_cast<float>(x), static_cast<float>(y),
+                                      static_cast<float>(x + width),
+                                      static_cast<float>(y + height));
+            tile.withGutter = D2D1::RectF(static_cast<float>(gutterLeft),
+                                          static_cast<float>(gutterTop),
+                                          static_cast<float>(gutterRight),
+                                          static_cast<float>(gutterBottom));
+            const HRESULT hr = m_renderTarget->CreateBitmap(
+                D2D1::SizeU(gutterRight - gutterLeft, gutterBottom - gutterTop),
+                m_cpuImage.pixels.data() + size_t{gutterTop} * m_cpuImage.stride
+                    + size_t{gutterLeft} * 4,
+                m_cpuImage.stride, properties, tile.bitmap.put());
+            if (FAILED(hr))
+            {
+                m_tiles.clear();
+                return hr;
+            }
+            m_tiles.push_back(std::move(tile));
+        }
+    }
+    return S_OK;
 }
 
 void MainWindow::Render()
@@ -1829,9 +1867,9 @@ void MainWindow::Render()
         return;
     }
 
-    if (!m_bitmap && m_cpuImage)
+    if (m_tiles.empty() && m_cpuImage)
     {
-        const HRESULT hr = CreateBitmapFromCpuImage();
+        const HRESULT hr = CreateTilesFromCpuImage();
         if (FAILED(hr))
         {
             m_cpuImage = {};  // don't retry on every frame
@@ -1844,14 +1882,35 @@ void MainWindow::Render()
 
     // The previous image stays up while the next one loads (or fails); the
     // status text overlays it, which avoids flicker when flipping quickly.
-    if (m_bitmap)
+    if (!m_tiles.empty())
     {
         const ViewLayout layout = ComputeLayout();
-        m_renderTarget->DrawBitmap(
-            m_bitmap.get(),
-            D2D1::RectF(layout.destX, layout.destY, layout.destX + layout.displayWidth,
-                        layout.destY + layout.displayHeight),
-            1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+
+        // Axis-aligned tiles must rasterize identically on both sides of a
+        // shared edge. Per-primitive antialiasing would blend each tile's
+        // fractional edge with the background separately, leaving a 1px
+        // hairline at every boundary at non-integer zoom levels.
+        const D2D1_ANTIALIAS_MODE previousMode = m_renderTarget->GetAntialiasMode();
+        m_renderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+        for (const auto& tile : m_tiles)
+        {
+            // Shared edges compute from identical expressions on both sides
+            // of a boundary, so adjacent tiles meet with no gap.
+            const D2D1_RECT_F dest =
+                D2D1::RectF(layout.destX + tile.source.left * layout.scale,
+                            layout.destY + tile.source.top * layout.scale,
+                            layout.destX + tile.source.right * layout.scale,
+                            layout.destY + tile.source.bottom * layout.scale);
+            const D2D1_RECT_F src =
+                D2D1::RectF(tile.source.left - tile.withGutter.left,
+                            tile.source.top - tile.withGutter.top,
+                            tile.source.right - tile.withGutter.left,
+                            tile.source.bottom - tile.withGutter.top);
+            m_renderTarget->DrawBitmap(tile.bitmap.get(), dest, 1.0f,
+                                       D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &src);
+        }
+        m_renderTarget->SetAntialiasMode(previousMode);
+
         if (InSelectionMode() && m_selection.HasRect())
         {
             DrawSelectionOverlay(layout);
