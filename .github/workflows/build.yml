@@ -18,6 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The preinstalled C:\vcpkg is a shallow clone, so the pinned
+      # builtin-baseline commit from vcpkg.json is not in its history and
+      # version resolution fails. Fetch that commit explicitly.
+      - name: Fetch vcpkg baseline commit
+        shell: pwsh
+        run: |
+          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          git -C $env:VCPKG_INSTALLATION_ROOT fetch --depth 1 origin $baseline
+
       - name: Configure and build (Release)
         shell: cmd
         run: |
