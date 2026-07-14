@@ -197,6 +197,7 @@ void MainWindow::OpenFolder(std::filesystem::path folder)
 void MainWindow::DisplayImage(const std::wstring& displayName, LoadedImage image)
 {
     ExitSelectionMode();  // a selection never survives an image change
+    StopAnimation();
 
     // Recycle the outgoing image so navigating back is instant. Clipboard
     // content and edited (rotated/flipped) images have no on-disk identity
@@ -269,13 +270,15 @@ LRESULT MainWindow::OnPrefetchDone(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lPa
         return 0;
     }
     m_prefetchPath.clear();
-    if (SUCCEEDED(result->hr))
+    if (SUCCEEDED(result->hr) && result->animation.size() <= 1)
     {
         m_cache.Put(result->path, std::move(result->image));
     }
     else
     {
-        m_prefetchFailed.push_back(result->path);  // no retry loops
+        // Failed, or animated: the cache only holds stills, so remember the
+        // path either way to avoid refetching it forever.
+        m_prefetchFailed.push_back(result->path);
     }
     TriggerPrefetch();
     return 0;
@@ -532,6 +535,7 @@ void MainWindow::EnterSelectionMode(SelectionPurpose purpose)
         ExitSelectionMode();  // the same command toggles the mode off
         return;
     }
+    StopAnimation();  // select on a frozen frame
     // Switching between crop and blackout keeps the current rectangle.
     m_selectionPurpose = purpose;
     Invalidate(FALSE);
@@ -613,6 +617,7 @@ void MainWindow::ApplyTransform(WORD commandId)
         return;
     }
     ExitSelectionMode();  // the rectangle would no longer match the pixels
+    StopAnimation();      // edits freeze the currently shown frame
     switch (commandId)
     {
     case IDM_EDIT_ROTATE_CW:
@@ -829,6 +834,7 @@ void MainWindow::ShowResizeDialog()
         return;
     }
     ExitSelectionMode();  // a selection would no longer match the pixels
+    StopAnimation();      // resize the currently shown frame
 
     ResizeDialog dialog(m_cpuImage.width, m_cpuImage.height);
     if (dialog.DoModal(m_hWnd) != IDOK)
@@ -1702,9 +1708,47 @@ LRESULT MainWindow::OnImageLoaded(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lPar
     }
     else
     {
+        std::vector<AnimationFrame> animation = std::move(result->animation);
         DisplayImage(result->path.filename().wstring(), std::move(result->image));
+        if (animation.size() > 1)
+        {
+            StartAnimation(std::move(animation));
+        }
     }
     return 0;
+}
+
+void MainWindow::StartAnimation(std::vector<AnimationFrame> frames)
+{
+    // The animation identity is the file, but the cache stores stills, so
+    // the frames must never be recycled into it on the way out.
+    m_displayedPath.clear();
+    m_animationFrames = std::move(frames);
+    m_animationIndex = 0;
+    SetTimer(kAnimationTimer, m_animationFrames.front().delayMs);
+}
+
+void MainWindow::StopAnimation()
+{
+    if (!m_animationFrames.empty())
+    {
+        KillTimer(kAnimationTimer);
+        m_animationFrames.clear();
+        m_animationIndex = 0;
+    }
+}
+
+void MainWindow::OnTimer(UINT_PTR timerId)
+{
+    if (timerId != kAnimationTimer || m_animationFrames.size() < 2)
+    {
+        return;
+    }
+    m_animationIndex = (m_animationIndex + 1) % m_animationFrames.size();
+    m_cpuImage = m_animationFrames[m_animationIndex].image;
+    m_tiles.clear();
+    SetTimer(kAnimationTimer, m_animationFrames[m_animationIndex].delayMs);
+    Invalidate(FALSE);
 }
 
 LRESULT MainWindow::OnFolderScanned(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
@@ -1764,6 +1808,7 @@ void MainWindow::OnPaint(CDCHandle /*dc*/)
 
 void MainWindow::OnDestroy()
 {
+    StopAnimation();
     // Stop and join the workers before the window goes away.
     m_loader.reset();
     m_scanner.reset();

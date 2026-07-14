@@ -39,6 +39,7 @@ public:
         MSG_WM_CAPTURECHANGED(OnCaptureChanged)
         MSG_WM_HSCROLL(OnHScroll)
         MSG_WM_VSCROLL(OnVScroll)
+        MSG_WM_TIMER(OnTimer)
         MSG_WM_DROPFILES(OnDropFiles)
         MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
         MSG_WM_DESTROY(OnDestroy)
@@ -111,6 +112,7 @@ private:
     void OnCaptureChanged(HWND newCapture);
     void OnHScroll(int code, short pos, HWND scrollBar);
     void OnVScroll(int code, short pos, HWND scrollBar);
+    void OnTimer(UINT_PTR timerId);
     void OnDropFiles(HDROP drop);
     void OnInitMenuPopup(CMenuHandle menu, UINT index, BOOL sysMenu);
     void OnDestroy();
@@ -186,6 +188,15 @@ private:
     std::unique_ptr<ImageLoader> m_loader;
     std::unique_ptr<FolderScanner> m_scanner;
     LoadedImage m_cpuImage;  // kept after upload so device loss needs no re-decode
+
+    // Animation playback (Phase 3 step 18). Edits and selection freeze the
+    // current frame; animated images stay out of the prefetch cache.
+    static constexpr UINT_PTR kAnimationTimer = 1;
+    std::vector<AnimationFrame> m_animationFrames;
+    size_t m_animationIndex = 0;
+
+    void StartAnimation(std::vector<AnimationFrame> frames);
+    void StopAnimation();
     ViewState m_state = ViewState::Empty;
     std::wstring m_statusText;
     uint64_t m_expectedGeneration = 0;

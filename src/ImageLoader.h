@@ -13,6 +13,13 @@
 // maximum bitmap size. Tiling (Phase 3) will lift this limit.
 inline constexpr HRESULT kHrImageTooLarge = MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0x0200);
 
+// One frame of an animated image, pre-composited to the full canvas.
+struct AnimationFrame
+{
+    uint32_t delayMs = 100;
+    LoadedImage image;
+};
+
 // Decodes image files on a resident background thread so file I/O (which may
 // stall on OneDrive hydration or slow SMB shares) never blocks the UI thread.
 //
@@ -27,7 +34,9 @@ public:
         uint64_t generation = 0;
         std::filesystem::path path;
         HRESULT hr = E_FAIL;
-        LoadedImage image;  // valid only when SUCCEEDED(hr)
+        LoadedImage image;  // valid only when SUCCEEDED(hr); the first frame
+                            // when the file is animated
+        std::vector<AnimationFrame> animation;  // >1 entries when animated
     };
 
     ImageLoader(HWND notifyWindow, UINT notifyMessage);
@@ -57,7 +66,8 @@ private:
 
     void WorkerProc(std::stop_token stopToken) noexcept;
     HRESULT Decode(IWICImagingFactory* factory, Request& request,
-                   const std::stop_token& stopToken, LoadedImage& out) noexcept;
+                   const std::stop_token& stopToken, LoadedImage& out,
+                   std::vector<AnimationFrame>& outAnimation) noexcept;
     bool ShouldAbort(const std::stop_token& stopToken);
 
     HWND m_notifyWindow;
