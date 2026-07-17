@@ -4,10 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  release:
+    types: [published]
   workflow_dispatch:
 
+# contents: write is needed to upload release assets; it is harmless for
+# the other triggers, which never write.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -69,3 +73,14 @@ jobs:
           name: chirami-win64
           path: dist/
           if-no-files-found: error
+
+      - name: Attach the archive to the release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          $zip = "chirami-$env:TAG_NAME-win64.zip"
+          Compress-Archive -Path dist\* -DestinationPath $zip
+          gh release upload $env:TAG_NAME $zip --clobber
