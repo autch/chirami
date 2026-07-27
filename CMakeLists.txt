@@ -54,3 +54,12 @@ target_compile_options(chirami PRIVATE
     /utf-8
     /Zc:__cplusplus
 )
+
+# The optional runtime JPEG codec (see DESIGN.md). The x64-chirami overlay
+# triplet builds libjpeg-turbo as a DLL with a static CRT; keep it next to
+# the exe, which is where TurboJpeg.cpp loads it from (full path, no search).
+add_custom_command(TARGET chirami POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}$<$<CONFIG:Debug>:/debug>/bin/turbojpeg.dll"
+        "$<TARGET_FILE_DIR:chirami>"
+)

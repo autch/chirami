@@ -283,6 +283,7 @@ END
     - TurboJPEG 3 API（tj3 系）を使用。turbojpeg.dll を exe と同じディレクトリから**フルパス指定で LoadLibrary**（探索パスを使わない = DLL ハイジャック対策）。無ければ・失敗すれば（CMYK 等）WIC にフォールバック
     - JPEG 判定は拡張子でなく先頭バイトの SOI シグネチャ（FF D8 FF）
     - コンパイル時は vcpkg の turbojpeg.h のみ参照し、.lib はリンクしない。tj3Init は 3.2 以降マクロのため tj3InitVersion / tj3Init の両対応で解決する
+    - DLL のビルドはオーバーレイトリプレット `triplets/x64-chirami.cmake`（libjpeg-turbo のみ DLL、CRT は静的）による通常のマニフェストインストールで行い、ポストビルドで exe の隣にコピーする（2026-07 変更。以前の classic モード x64-windows ビルドは動的 CRT のため vcruntime140.dll に依存していた。静的 CRT 化で DLL の依存は KERNEL32 のみになり、ZIP の自己完結性が保たれる）
     - 配布 ZIP: turbojpeg.dll（削除で無効化可）+ licenses/libjpeg-turbo.txt（vcpkg の copyright = IJG/BSD/zlib の 3 ライセンス併記）+ LICENSE（chirami 本体の MIT）。README に IJG 由来の一文を記載
 20. HDR 対応（DXGI SwapChain 移行）（完了。詳細はアーキテクチャ方針 > レンダリングを参照）
 21. 追加フォーマット対応の検討（ライセンスを精査の上）

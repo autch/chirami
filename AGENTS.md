@@ -22,8 +22,10 @@ conventions, and workflow.
 - Build system: CMake + vcpkg (manifest mode, pinned builtin-baseline)
 - UI framework: WTL (Windows Template Library)
 - Utilities: WIL (Windows Implementation Libraries)
-- CRT: Universal CRT, statically linked (/MT) so the portable ZIP needs no VC++ redistributable
-  (triplet x64-windows-static)
+- CRT: Universal CRT, statically linked (/MT) so the portable ZIP needs no VC++ redistributable.
+  The vcpkg triplet is the overlay `triplets/x64-chirami.cmake`: everything static like
+  x64-windows-static, except libjpeg-turbo which builds as a DLL (still static CRT) and is
+  copied next to the exe by a post-build step
 
 ## CI
 
@@ -39,9 +41,10 @@ the ZIP to the release assets.
   files are read from the working tree, so before configuring, `git fetch --depth 1` the
   baseline commit **and check it out** (fetch alone yields "no version database entry" for
   newer ports)
-- turbojpeg.dll is built with classic-mode `vcpkg install libjpeg-turbo:x64-windows`.
-  Classic mode refuses to run inside a manifest directory, so set working-directory to
-  runner.temp. Ship vcpkg's generated share/libjpeg-turbo/copyright as
+- turbojpeg.dll comes out of the regular manifest install (x64-chirami overlay triplet)
+  and the post-build copy places it in build/release, so staging takes it from the build
+  tree. Ship vcpkg's generated share/libjpeg-turbo/copyright
+  (build/release/vcpkg_installed/x64-chirami/share/libjpeg-turbo/copyright) as
   licenses/libjpeg-turbo.txt
 
 ## Coding conventions

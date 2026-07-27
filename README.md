@@ -78,7 +78,7 @@ cmake --build --preset release
 
 CRT は静的リンクのため、VC++ 再頒布可能パッケージのインストールは不要です。 / The CRT is statically linked; no VC++ redistributable is required to run the binary.
 
-任意の `turbojpeg.dll` は `vcpkg install libjpeg-turbo:x64-windows` でビルドし、exe と同じフォルダに置きます。 / The optional `turbojpeg.dll` comes from `vcpkg install libjpeg-turbo:x64-windows`; place it next to the exe.
+任意の `turbojpeg.dll` は vcpkg のマニフェストインストールでビルドされ、自動的に exe の隣にコピーされます（不要なら削除するだけで無効化できます）。 / The optional `turbojpeg.dll` is built by the vcpkg manifest install and copied next to the exe automatically (delete it to disable).
 
 main への push ごとに GitHub Actions が release ビルドを行い、`chirami-win64` アーティファクト（chirami.exe、turbojpeg.dll、ライセンス一式）を生成します。 / Every push to main is built by GitHub Actions, producing the `chirami-win64` artifact (chirami.exe, turbojpeg.dll, and the license files).
 
