@@ -1,273 +1,72 @@
-# CLAUDE.md — Windows Image Viewer Project
+# AGENTS.md — agent instructions for chirami
 
-## プロジェクト概要
+Fast, lightweight, Windows-native image viewer "chirami" (チラ見).
 
-Windows 11 x64 以降をターゲットとした、高速・軽量な画像ビューア。
-IrfanView や qView のような既存ビューアの代替として、商用利用に制限のないライセンス（MIT）で提供する。
-クロスプラットフォームはスコープ外。Windows ネイティブに徹する。
+**All design decisions, specifications, and their rationale live in [DESIGN.md](DESIGN.md) (Japanese).**
+Consult the relevant section before implementing or changing behavior, and record any new
+design decision there. This file contains only working instructions: build, CI, coding
+conventions, and workflow.
 
-## 背景・動機
+## Hard rules
 
-- IrfanView は商用利用にライセンス購入が必要
-- XnView も同様に商用ライセンスが必要
-- qView は GPLv3 で商用利用可能だが、Qt 依存で配布サイズが大きい
-- JTC（Japanese Traditional Companies：旧財閥系・民族系多国籍企業等の日本の大企業）環境で使うため、ライセンスの明快さ・ポータブル性・管理者権限不要が重要
+- **Never block the UI thread.** File I/O, decoding, and encoding always run on background threads
+- **No network access whatsoever** (no update checks, no telemetry; see DESIGN.md「ネットワーク」)
+- **No registry for settings.** Settings go to an INI under %APPDATA% (file association is the
+  one conditional exception; see DESIGN.md「ファイルの関連付け」)
+- **Stay portable.** Runs from an unzipped folder, no admin rights, no features that require regsvr32
+- **Every user-facing string goes into the STRINGTABLE (ja/en).** No literals in code
 
-## ライセンス
+## Build environment
 
-MIT License を採用する。
-
-同梱する 3rd party ライブラリのライセンスに注意すること：
-- LGPL ライブラリは動的リンク（DLL）にしなければ MIT と共存できない
-- libheif（LGPL）は依存が膨大なので当面不採用
-- libjpeg-turbo は IJG / Modified BSD / zlib の 3 ライセンス複合。バイナリ配布時はライセンス文全文（licenses/libjpeg-turbo.txt）の同梱と、IJG が求める一文（"This software is based in part on the work of the Independent JPEG Group."）の README 記載が必要（対応済み）。無くても WIC で JPEG は読めるため、DLL はオプショナル
-
-## ビルド環境
-
-- Visual C++ (MSVC)
-- ビルドシステム: CMake + vcpkg
-- UI フレームワーク: WTL (Windows Template Library)
-- ユーティリティ: WIL (Windows Implementation Libraries)
-- CRT: Universal CRT (uCRT)。静的リンク（/MT）で exe に含める。VC++ 再頒布可能パッケージなしで ZIP 展開のみで動作させるための決定（トリプレットは x64-windows-static）
-
-## アーキテクチャ方針
-
-### 画像デコード
-
-Windows Imaging Component (WIC) を最大限利用する。
-
-WIC で Windows 10/11 標準搭載で対応済みのフォーマット：
-- JPEG, PNG, BMP, GIF, TIFF, ICO — OS 標準
-- WebP — Windows 10 以降で OS 標準 WIC コーデック搭載
-- AVIF — Windows 11 で OS 標準の AV1 コーデックにより WIC 対応
-- HEIC — Microsoft Store の「HEIF 画像拡張機能」が必要。Store がポリシーで封鎖された JTC 環境では使えないため、対応できなくても許容する
-
-3rd party ライブラリでの拡張は WIC を軸にした上での上乗せとする。
-
-libjpeg-turbo は導入済み（詳細は Phase 4 ステップ 19 参照）：
-- turbojpeg.dll が exe と同じディレクトリに存在すれば JPEG のデコードに優先使用する
-- なければ・失敗すれば WIC にフォールバック
-- DLL 同梱 + 実行時動的ロード（フルパス LoadLibrary）。リンクはしない
-
-### レンダリング
-
-**基本構成: WIC → Direct2D（HDR 対応済み）**
-
-- D3D11 デバイス（HW、失敗時 WARP）+ FLIP モデルの DXGI SwapChain（DXGI_FORMAT_R16G16B16A16_FLOAT）を自前で構成し、SetColorSpace1 で scRGB（DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709、リニア、1.0 = SDR 白）を指定。SDR ディスプレイでも HDR ディスプレイでも DWM が正しく合成する
-- Direct2D は ID2D1DeviceContext 経由で SwapChain のバックバッファに描画。SetDpi(96,96) で 1 DIP = 1 物理ピクセルを維持
-- SDR 画像のタイルは DXGI_FORMAT_B8G8R8A8_UNORM_SRGB でアップロードし、サンプリング時のハードウェア sRGB デコードでリニアターゲットに正しく乗せる（移行前とピクセル一致することを検証済み）
-- 高精度ソース（チャンネルあたり 9bit 以上: 16bit 整数、half/float、10bit パック形式）は WIC で 64bppPRGBAHalf に変換して保持し、FP16 タイルとして scRGB のまま描画する。1.0 超の値は HDR ディスプレイでそのまま光る
-- ウィンドウリサイズは ResizeBuffers（タイルは D2D デバイス上に残るため再アップロード不要）。デバイスロストは DXGI_ERROR_DEVICE_REMOVED / RESET を検知して全再構築
-- **SDR 白レベル補正**: HDR（詳細カラー）有効時、DWM は通常の SDR ウィンドウを SDR 輝度設定（例 240 nits）まで増幅する一方、scRGB サーフェスは 1.0 = 80 nits 固定で合成する。そのままでは chirami だけ暗くなるため、モニタの SDR 白レベル（DISPLAYCONFIG_SDR_WHITE_LEVEL）を取得し、シーンを中間 FP16 ビットマップに描いてから ColorMatrix エフェクトで白レベル倍して合成する。SDR ディスプレイでは倍率 1 で直描き。ウィンドウ移動（モニタ跨ぎ）と WM_DISPLAYCHANGE で再取得
-- 既知の制限 1: PQ (HDR10) など明示的な伝達関数を持つソースの色変換は未対応（WIC の変換に任せた範囲で表示）。必要になったらカラーコンテキスト + ColorManagement エフェクトで対応する
-- 既知の制限 2: iPhone の HDR 写真（SDR ベース + HDR ゲインマップ構造）は、WIC がゲインマップ（補助画像）を公開しないため SDR レンディションでの表示になる。ハイライトが SDR 白を超えて光る効果は再現されない。ICC プロファイル（Display P3 等）による色域変換も未対応
-- 画像の補間付きリサイズは Direct2D の補間モード指定で対応
-
-Direct3D 12 はこの用途ではオーバーキル。使わない。
-
-**WTL と Direct2D の統合に関する注意:**
-
-- WM_PAINT では BeginPaint/EndPaint ではなく BeginDraw/EndDraw を使う
-- WM_SIZE でレンダーターゲットのリサイズ処理が必要
-- WTL の CWindowImpl を継承したウィンドウクラスに Direct2D 描画を統合する
-
-### 画像の大サイズ対応
-
-- Unity や Blender のテクスチャを扱うため、4K・8K 画像を制限なく扱えること
-- Direct2D のテクスチャサイズ上限は GPU 依存（最近の GPU なら 16384x16384）
-- 8192x8192 を超える場合はタイリングが必要になる可能性がある
-- 設計上、タイリング対応を後から入れられるようにしておく
-
-### マルチスレッド・非同期 I/O
-
-**可能な限り UI スレッドをブロックしないこと。** これは全体を通じた設計原則である。
-
-- ファイル I/O と画像デコードは必ずバックグラウンドスレッドで行い、メインスレッドは描画に専念する
-- 画像の読み込み中は、読み込み中であることを示す表示（スピナー等）を出し、ウィンドウ操作（移動・リサイズ・閉じる）は常に受け付ける
-- OneDrive 等のクラウド同期フォルダでは、ファイルがローカルに存在せずオンデマンドで取得される場合がある。←→キーで切り替えた先のファイルがまだ手元にないとき、ダウンロード完了まで UI が固まってはならない
-- SMB 共有（\\\\servername\\share\\ 形式のパス）上の画像も同様に、ネットワーク遅延で I/O が遅い場合に UI をブロックしない
-- スライドショー中の次画像先読みなど、マルチコアを活用する
-- バッファリング戦略の最適化（ローカル vs ネットワーク vs クラウド同期）は後回しでよいが、I/O を非同期にする基本構造は Phase 1 から入れておく
-
-## UI 仕様
-
-### ウィンドウ
-
-- 関連付けで起動されたら、その画像を即座に表示する
-- 関連付けの登録はアプリでは行わない。Windows の「プログラムから開く」→「常にこのアプリを使う」による自動登録（HKCU、シェルが書く）に任せ、アプリは渡されたパスを表示する受け側のみ実装する
-- UI 要素はメニューバーとスクロールバーのみ。ツールバー等は初期状態では出さない
-- 表示するファイルが変わるたびに表示倍率を再評価する:
-  - フルスクリーン中はフィット表示（ウィンドウには触れない）
-  - 等倍の画像サイズが chrome（ウィンドウ枠・メニューバー）込みで作業領域に収まるなら、ウィンドウを画像サイズに合わせて等倍表示する。ウィンドウ全体が画面内に収まるよう位置を調整し、最小ウィンドウサイズ制限に従う
-  - 収まらない場合は、画像の長辺を優先（アスペクト比を保ったまま作業領域いっぱい）にウィンドウを合わせ、フィット表示する
-  - 最大化中はウィンドウサイズを変えず、収まるなら等倍・収まらなければフィット表示
-- 最大化、フルスクリーン表示に対応（F11 でトグル、Esc で解除。フルスクリーン中はスクロールバーを出さず、パンはドラッグ/ホイールで行う）
-- 補間付きリサイズでウィンドウサイズに合わせて表示
-- ワンキーで等倍（dot-by-dot）表示に切り替え（1 キー）。フィット表示への切り替えは独立したキー（0 キー）で行う
-- +/- キーおよび Ctrl+ホイールで拡大縮小（Ctrl+ホイールはカーソル位置を中心にズーム）
-- 最大化・フルスクリーンでないとき、ズーム操作の後はウィンドウを表示サイズに合わせて自動リサイズする。表示が作業領域に収まらない場合は、収まる最大サイズ（最終的には作業領域全体）まで広げてスクロールバーを表示する。いずれの場合もウィンドウ左上は極力動かさない（画面からはみ出すときのみ最小限移動）
-- 描画領域が尽きる場合のズームアウト（表示が 1px 未満になる、メニュー折り返し等でクライアント領域が無い）や、倍率の下限・上限に達した操作は MessageBeep で無視する
-- 表示サイズがウィンドウを超えるときは左ドラッグでパンでき、必要な軸のみスクロールバーを表示する
-- Per-Monitor V2 の DPI 対応。画像は表示スケール設定に依らず物理ピクセル基準（等倍 = dot-by-dot）で、DPI に追従するのは自前 UI（ステータステキスト、スクロール量）のみ
-- バージョン情報ボックスには、バージョン・ライセンスに加えて libjpeg-turbo のロード状態と、インストール済み WIC デコーダの一覧（フレンドリ名 + 拡張子）を表示する
-
-### ナビゲーション
-
-- ←→ キーで同一フォルダ内の前後のファイルに切り替え
-- 並び順は既定でファイル名の自然順（StrCmpLogicalW、エクスプローラーと同じ）。名前/更新日時/サイズ・昇順/降順を設定で変更可能にする
-- 隠し属性のファイルはフォルダ内ナビゲーションの対象から除外する（エクスプローラーの既定表示と同様。明示的に開いた場合は表示する）
-- 先頭・末尾を越えるキー操作は 1 回目に MessageBeep で警告し、続けて押すと反対端へループする（この挙動はのちに設定可能とする）
-
-### 編集（優先度低）
-
-- 回転（90度単位）・反転
-- クロップ
-- リサイズ（4 フィールドのダイアログで指定: 幅・高さそれぞれにピクセル欄と % 欄があり、どれを編集しても他がライブ連動する。縦横比維持チェック（既定オン）で「片方だけ指定してなりゆき」も「% でざっくり」も 1 操作で可能。% は開いた時点のサイズが基準、確定はピクセル値。DIALOGEX を日英 LANGUAGE ブロックで定義）
-- 黒塗り（スクリーンショットの個人情報を伏せるため）
-
-クロップと黒塗りは共通の範囲選択モードで行う:
-
-- メニューまたはキー（C=クロップ、B=黒塗り）でモードに入り、左ドラッグでラバーバンドを描く（モード中はパンとファイルナビゲーションを無効化。ズームは可能）
-- 選択は画像座標系で保持し、ズーム・パンしても画像に張り付いたまま
-- **選択は後から調整できること**: 四隅 + 四辺の 8 ハンドルでリサイズ、内側ドラッグで移動、外側ドラッグで新規選択。ホバーで方向カーソルに変化
-- Enter または選択内側のダブルクリックで適用、Esc でモード解除。クロップは適用後モードを抜ける。黒塗りは適用後もモードに留まり、続けて複数箇所を塗れる（Esc で抜ける）
-- 選択の移動はポインタがドラッグしきい値（SM_CXDRAG/SM_CYDRAG）を超えてから開始する。クリックやダブルクリックの手ぶれで選択がずれないようにするため
-- 適用は回転・反転と同じくピクセルに焼き込み（保存に反映、キャッシュ対象外）
-
-### ファイル操作
-
-- ドラッグ＆ドロップでファイルを開く。フォルダを渡された場合（D&D・関連付け・コマンドライン共通）は、その中の最初の画像（現在の並び順）を表示する。表示できる画像がなければメッセージを出す
-- フォーマットを変更して保存（例: PNG → JPEG）
-- クリップボードからの画像貼り付け
-
-### 非対応（スコープ外）
-
-- スライドショー（時間経過で自動的に次の画像へ切り替える機能。2026-07 に不採用と決定）
-- バッチ処理
-- サムネイルプロバイダ（シェル拡張）— regsvr32 が必要な機能はつけない
-- 動画再生（静止画とアニメーション系のみ）
-- ネットワーク（http/https URL）・クラウド連携
-
-## 配布形態
-
-- ZIP で配布し、展開するだけで使える（ポータブル）
-- インストーラーは任意だが、user インストール（管理者権限不要）に対応すること
-- シングルバイナリでなくてもよい（DLL 同梱可）
+- Visual C++ (MSVC), Visual Studio 2022 or 2026
+- Build system: CMake + vcpkg (manifest mode, pinned builtin-baseline)
+- UI framework: WTL (Windows Template Library)
+- Utilities: WIL (Windows Implementation Libraries)
+- CRT: Universal CRT, statically linked (/MT) so the portable ZIP needs no VC++ redistributable
+  (triplet x64-windows-static)
 
 ## CI
 
-GitHub Actions（`.github/workflows/build.yml`）が main への push / PR ごとに release ビルドを行い、`chirami-win64` アーティファクト（chirami.exe、turbojpeg.dll、README.md、LICENSE、licenses/libjpeg-turbo.txt）を生成する。
+GitHub Actions (`.github/workflows/build.yml`) runs a release build on every push to main,
+PR, and release publish, producing the `chirami-win64` artifact (chirami.exe, turbojpeg.dll,
+README.md, LICENSE, licenses/libjpeg-turbo.txt). On release publish it additionally attaches
+the ZIP to the release assets.
 
-- ランナーは windows-latest（VS 2026）。MSVC 環境は vswhere で最新 VS を検出して vcvars64 を呼ぶ（サードパーティのセットアップアクションは使わない）
-- ランナーの vcpkg は shallow clone で、チェックアウトが builtin-baseline より古いことがある。baseline.json は git 経由で読まれるが versions データベースとポート実体は作業ツリーから読まれるため、configure 前に baseline コミットを `git fetch --depth 1` **して checkout まで行う**（fetch だけだと新しめのポートが "no version database entry" になる）
-- turbojpeg.dll は classic モードの `vcpkg install libjpeg-turbo:x64-windows` でビルドする。classic モードはマニフェストのあるディレクトリでは動かないので working-directory を runner.temp にする。ライセンス文は vcpkg が生成する share/libjpeg-turbo/copyright を licenses/libjpeg-turbo.txt として同梱する
+- Runner is windows-latest (VS 2026). Locate MSVC via vswhere and call vcvars64; no
+  third-party setup actions
+- The runner's preinstalled vcpkg is a shallow clone whose checkout may be older than the
+  pinned builtin-baseline. baseline.json is read via git, but the versions database and port
+  files are read from the working tree, so before configuring, `git fetch --depth 1` the
+  baseline commit **and check it out** (fetch alone yields "no version database entry" for
+  newer ports)
+- turbojpeg.dll is built with classic-mode `vcpkg install libjpeg-turbo:x64-windows`.
+  Classic mode refuses to run inside a manifest directory, so set working-directory to
+  runner.temp. Ship vcpkg's generated share/libjpeg-turbo/copyright as
+  licenses/libjpeg-turbo.txt
 
-## 設定の保存先
-
-- 設定ファイル: `%APPDATA%` 以下（ローミングプロファイルで同期される。これは意図通り）
-- キャッシュ: `%LOCALAPPDATA%` 以下（ローミングしない）
-- レジストリは使わない
-
-## ネットワーク
-
-**一切のインターネットアクセスを行ってはならない。**
-
-- 更新確認機能はつけない
-- テレメトリ、クラッシュレポート送信なし
-- Windows Firewall の設定が不要であること
-- LAN 上の SMB 共有（UNC パス）へのアクセスは通常のファイル I/O として許容する
-
-## 実装の進め方
-
-### Phase 1: 最小限のビューア（完了）
-1. CMake + vcpkg + WTL でプロジェクトスケルトン作成
-2. WIC で画像をデコードし、Direct2D (HwndRenderTarget) でウィンドウに表示
-3. ←→キーで同一フォルダ内の画像切り替え（並び順はファイル名の自然順で固定。比較関数は Phase 2 での設定化を見込んで差し替え可能な構造にする）
-4. ドラッグ＆ドロップでファイルを開く
-5. ウィンドウサイズに合わせた補間付きリサイズ表示
-6. 等倍表示の切り替え、拡大縮小（+/- キー、Ctrl+ホイール）、左ドラッグでのパンとスクロールバー
-7. フルスクリーン表示
-
-### Phase 2: 基本機能（完了）
-8. メニューバーの実装
-9. 関連付け起動への対応（登録は Windows のシェルに任せ、アプリは受け側のみ）
-10. フォーマット変換保存（PNG/JPEG/BMP/TIFF。エンコードもバックグラウンドスレッド）
-11. クリップボードからの貼り付け（"PNG" 形式優先、CF_DIB フォールバック）
-12. 回転・反転（CPU でピクセルに焼き込み。保存にも反映される）
-13. 設定ファイルの読み書き（%APPDATA%\chirami\chirami.ini。言語・並び順を保持）
-14. 並び順の設定（名前/更新日時/サイズ、昇順/降順。メニューから選択し設定ファイルに保存）
-
-### Phase 3: 応用機能（完了）
-15. 画像先読み（マルチスレッド）（完了）
-    - 専用ワーカーが現在ファイルの前後 1 枚ずつを ImageCache（上限 512 MiB）へデコードし、←→はキャッシュヒットなら即表示。表示中だった画像もキャッシュへ回収され、戻り方向も即表示になる。回転・反転した画像とクリップボード画像はキャッシュしない
-    - スライドショーは不採用になった（非対応セクション参照）
-16. クロップ・リサイズ・黒塗り（完了。クロップと黒塗りは 8 ハンドル + 移動対応の範囲選択モード、リサイズは幅×高さ + 縦横比維持のダイアログ（Ctrl+R）で WIC Fant 補間により実施）
-17. 大サイズ画像（8K 超）のタイリング対応（完了。GPU 上限を超える画像は 8192px タイルに分割してアップロード。タイルは 1px のガターを持ち、描画時にソース矩形でマップするため境界に継ぎ目が出ない。上限はデコード側の 2GiB ピクセルデータ ≒ 約 23000×23000）
-18. アニメーション GIF / WebP / AVIF の再生（完了。ワーカーで全フレームをフルキャンバスに事前合成（GIF はフレーム矩形・ディスポーザル・透過を処理、他コンテナはフルフレーム上書きとみなす）し、UI は WM_TIMER でフレーム切り替え。合成メモリ上限 1GiB 超は先頭フレームの静止画にフォールバック。編集・範囲選択はアニメーションを停止して現在フレームを凍結する。アニメーションは先読みキャッシュ対象外。ループ回数指定は無視して無限ループ）
-
-### Phase 4: 最適化・拡張
-19. libjpeg-turbo のオプショナル同梱（完了）
-    - TurboJPEG 3 API（tj3 系）を使用。turbojpeg.dll を exe と同じディレクトリから**フルパス指定で LoadLibrary**（探索パスを使わない = DLL ハイジャック対策）。無ければ・失敗すれば（CMYK 等）WIC にフォールバック
-    - JPEG 判定は拡張子でなく先頭バイトの SOI シグネチャ（FF D8 FF）
-    - コンパイル時は vcpkg の turbojpeg.h のみ参照し、.lib はリンクしない。tj3Init は 3.2 以降マクロのため tj3InitVersion / tj3Init の両対応で解決する
-    - 配布 ZIP: turbojpeg.dll（削除で無効化可）+ licenses/libjpeg-turbo.txt（vcpkg の copyright = IJG/BSD/zlib の 3 ライセンス併記）+ LICENSE（chirami 本体の MIT）。README に IJG 由来の一文を記載
-20. HDR 対応（DXGI SwapChain 移行）（完了。詳細はアーキテクチャ方針 > レンダリングを参照）
-21. 追加フォーマット対応の検討（ライセンスを精査の上）
-
-## ローカライズ
-
-基本言語は日本語。英語にも対応する（2言語）。
-
-### 方式
-
-リソーススクリプト内の STRINGTABLE に `LANGUAGE` ディレクティブで日本語・英語の両方を埋め込む。ダイアログリソースも同様に言語ごとに定義する。
-
-```rc
-// 例
-LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
-STRINGTABLE
-BEGIN
-    IDS_OPEN_FILE    L"ファイルを開く"
-    IDS_SAVE_AS      L"名前を付けて保存"
-END
-
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
-STRINGTABLE
-BEGIN
-    IDS_OPEN_FILE    L"Open File"
-    IDS_SAVE_AS      L"Save As"
-END
-```
-
-### 言語の切り替え
-
-- `GetUserDefaultUILanguage()` で OS の UI 言語を取得し、対応する言語リソースを使用する
-- `SetThreadUILanguage()` でスレッドの言語を設定すれば、以降の `LoadString` 等が自動的に適切な言語を返す
-- 設定ファイルで言語を明示的に指定するオプションも用意する（OS の言語と異なる言語で使いたい場合）
-
-### 設計上の注意
-
-- すべてのユーザー向け文字列は STRINGTABLE に定義し、コード中にリテラルで埋め込まない
-- メニュー項目、ダイアログのラベル、ステータスバーのメッセージ、エラーメッセージ等すべてが対象
-- 2言語であればバイナリサイズの増加はごくわずかなので、シングルバイナリに収まりポータブル性を損なわない
-- 将来的に翻訳者がリビルドなしで言語を追加できるよう、外部テキストファイル方式への移行を検討する可能性がある。ただし現時点では不要
-
-## コーディング規約
+## Coding conventions
 
 - C++20
-- コンパイラ: Visual Studio 2022 または 2026 の MSVC
-- Windows API は Unicode (W 系) を使用
-- エラーハンドリングは WIL の THROW_IF_FAILED / RETURN_IF_FAILED パターンを推奨
-- COM オブジェクトの管理は wil::com_ptr を使用
-- スレッド同期には標準ライブラリ（std::thread, std::mutex 等）を使用
+- Windows API: Unicode (W) variants only
+- Error handling: WIL THROW_IF_FAILED / RETURN_IF_FAILED patterns
+- COM lifetime: wil::com_ptr
+- Thread synchronization: standard library (std::thread, std::mutex, etc.)
 
-## 言語ポリシー
+## Workflow
 
-| 対象 | 言語 |
+- Roadmap and progress: DESIGN.md「ロードマップと進捗」. Work proceeds phase by phase,
+  step by step; each step starts on the user's instruction and the next begins only after
+  the user has reviewed the result
+- Commit and push only when the user explicitly asks
+- Keep DESIGN.md and README.md in sync with reality after each completed step or design change
+
+## Language policy
+
+| Target | Language |
 |---|---|
-| ソースコード（変数名・コメント） | 英語 |
-| コミットログ | 英語 |
-| README | 日英併記 |
-| CLAUDE.md | 日本語 |
-| エージェントとのコミュニケーション | 日本語 |
-| エージェントが書く文書・設計メモ | 日本語 |
+| Source code (identifiers, comments) | English |
+| Commit messages | English |
+| README | Japanese and English |
+| AGENTS.md | English |
+| DESIGN.md and other design docs | Japanese |
+| Communication with the user | Japanese |
