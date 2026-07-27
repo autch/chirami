@@ -19,6 +19,7 @@ inline constexpr UINT WM_APP_IMAGE_LOADED = WM_APP + 1;
 inline constexpr UINT WM_APP_FOLDER_SCANNED = WM_APP + 2;
 inline constexpr UINT WM_APP_SAVE_DONE = WM_APP + 3;
 inline constexpr UINT WM_APP_PREFETCH_DONE = WM_APP + 4;
+inline constexpr UINT WM_APP_ASSOC_CHECK = WM_APP + 5;
 
 class MainWindow : public CWindowImpl<MainWindow>
 {
@@ -50,6 +51,7 @@ public:
         MESSAGE_HANDLER(WM_APP_FOLDER_SCANNED, OnFolderScanned)
         MESSAGE_HANDLER(WM_APP_SAVE_DONE, OnSaveDone)
         MESSAGE_HANDLER(WM_APP_PREFETCH_DONE, OnPrefetchDone)
+        MESSAGE_HANDLER(WM_APP_ASSOC_CHECK, OnAssocCheck)
         COMMAND_ID_HANDLER(IDM_FILE_OPEN, OnFileOpen)
         COMMAND_ID_HANDLER(IDM_FILE_SAVEAS, OnFileSaveAs)
         COMMAND_ID_HANDLER(IDM_FILE_EXIT, OnFileExit)
@@ -64,6 +66,9 @@ public:
         COMMAND_ID_HANDLER(IDM_VIEW_ZOOMIN, OnViewZoomIn)
         COMMAND_ID_HANDLER(IDM_VIEW_ZOOMOUT, OnViewZoomOut)
         COMMAND_ID_HANDLER(IDM_VIEW_FULLSCREEN, OnViewFullscreen)
+        COMMAND_ID_HANDLER(IDM_ASSOC_REGISTER, OnAssocRegister)
+        COMMAND_ID_HANDLER(IDM_ASSOC_UNREGISTER, OnAssocUnregister)
+        COMMAND_ID_HANDLER(IDM_ASSOC_SETTINGS, OnAssocSettings)
         COMMAND_ID_HANDLER(IDM_HELP_ABOUT, OnHelpAbout)
     END_MSG_MAP()
 
@@ -136,6 +141,11 @@ private:
     LRESULT OnViewZoomIn(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewZoomOut(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewFullscreen(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnAssocRegister(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnAssocUnregister(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnAssocSettings(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnAssocCheck(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    void RegisterAssociations(bool offerSettings);
     LRESULT OnHelpAbout(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnDpiChanged(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnImageLoaded(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);

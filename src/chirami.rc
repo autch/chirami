@@ -26,6 +26,12 @@ BEGIN
     IDS_ABOUT_TJ_LOADED      L"libjpeg-turbo: 使用中 (turbojpeg.dll)"
     IDS_ABOUT_TJ_MISSING     L"libjpeg-turbo: 未検出（JPEG は WIC でデコード）"
     IDS_ABOUT_FORMATS        L"対応形式 (WIC デコーダー):"
+    IDS_ASSOC_TYPENAME       L"chirami {} ファイル"
+    IDS_ASSOC_DESCRIPTION    L"高速・軽量な画像ビューア"
+    IDS_ASSOC_REGISTERED     L"関連付けを登録しました。chirami-unregister.reg でいつでも解除できます。\n\nWindows の「既定のアプリ」設定を開いて、chirami を既定にしますか?"
+    IDS_ASSOC_UNREGISTERED   L"関連付けを解除しました。"
+    IDS_ASSOC_MOVED          L"chirami.exe の場所が関連付けの登録時から変わっています。\n現在の場所で関連付けを更新しますか?"
+    IDS_ERR_ASSOC            L"関連付けの処理に失敗しました"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -54,6 +60,14 @@ BEGIN
     BEGIN
         MENUITEM "開く(&O)...\tCtrl+O",           IDM_FILE_OPEN
         MENUITEM "名前を付けて保存(&A)...\tCtrl+S", IDM_FILE_SAVEAS
+        MENUITEM SEPARATOR
+        POPUP "関連付け(&N)"
+        BEGIN
+            MENUITEM "登録・更新(&R)",            IDM_ASSOC_REGISTER
+            MENUITEM "解除(&U)",                  IDM_ASSOC_UNREGISTER
+            MENUITEM SEPARATOR
+            MENUITEM "既定のアプリ設定を開く(&D)", IDM_ASSOC_SETTINGS
+        END
         MENUITEM SEPARATOR
         MENUITEM "終了(&X)",                      IDM_FILE_EXIT
     END
@@ -120,6 +134,12 @@ BEGIN
     IDS_ABOUT_TJ_LOADED      L"libjpeg-turbo: loaded (turbojpeg.dll)"
     IDS_ABOUT_TJ_MISSING     L"libjpeg-turbo: not found (JPEG decoded via WIC)"
     IDS_ABOUT_FORMATS        L"Supported formats (WIC decoders):"
+    IDS_ASSOC_TYPENAME       L"chirami {} File"
+    IDS_ASSOC_DESCRIPTION    L"A fast and lightweight image viewer"
+    IDS_ASSOC_REGISTERED     L"File associations registered. Run chirami-unregister.reg to undo at any time.\n\nOpen the Windows Default apps settings to make chirami the default?"
+    IDS_ASSOC_UNREGISTERED   L"File associations removed."
+    IDS_ASSOC_MOVED          L"chirami.exe has moved since file associations were registered.\nUpdate the associations to the current location?"
+    IDS_ERR_ASSOC            L"File association operation failed"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -148,6 +168,14 @@ BEGIN
     BEGIN
         MENUITEM "&Open...\tCtrl+O",              IDM_FILE_OPEN
         MENUITEM "Save &As...\tCtrl+S",           IDM_FILE_SAVEAS
+        MENUITEM SEPARATOR
+        POPUP "File Associatio&ns"
+        BEGIN
+            MENUITEM "&Register / Update",        IDM_ASSOC_REGISTER
+            MENUITEM "&Unregister",               IDM_ASSOC_UNREGISTER
+            MENUITEM SEPARATOR
+            MENUITEM "Open &Default Apps Settings", IDM_ASSOC_SETTINGS
+        END
         MENUITEM SEPARATOR
         MENUITEM "E&xit",                         IDM_FILE_EXIT
     END

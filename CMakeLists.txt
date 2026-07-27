@@ -22,6 +22,8 @@ add_executable(chirami WIN32
     src/TurboJpeg.cpp
     src/ImageTransform.cpp
     src/FolderScanner.cpp
+    src/FileAssociation.cpp
+    src/WicDecoders.cpp
     src/Settings.cpp
     src/chirami.rc
     src/chirami.manifest

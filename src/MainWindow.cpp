@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "FileAssociation.h"
 #include "ImageTransform.h"
 #include "ResizeDialog.h"
 #include "TurboJpeg.h"
@@ -98,6 +99,9 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
     SetMenu(m_menu);
 
     DragAcceptFiles(TRUE);
+
+    // Handled after the window is up so the prompt (if any) appears over it.
+    PostMessage(WM_APP_ASSOC_CHECK);
     return 0;
 }
 
@@ -492,6 +496,13 @@ void MainWindow::OnInitMenuPopup(CMenuHandle menu, UINT /*index*/, BOOL sysMenu)
     menu.CheckMenuItem(IDM_VIEW_ACTUAL, MF_BYCOMMAND | (actual ? MF_CHECKED : MF_UNCHECKED));
     menu.CheckMenuItem(IDM_VIEW_FULLSCREEN,
                        MF_BYCOMMAND | (m_fullscreen ? MF_CHECKED : MF_UNCHECKED));
+    // Only touch the registry when this popup actually holds the item.
+    if (menu.GetMenuState(IDM_ASSOC_UNREGISTER, MF_BYCOMMAND) != static_cast<UINT>(-1))
+    {
+        const bool registered = FileAssociation::Query().registered;
+        menu.EnableMenuItem(IDM_ASSOC_UNREGISTER,
+                            MF_BYCOMMAND | (registered ? MF_ENABLED : MF_GRAYED));
+    }
 
     const UINT imageState = MF_BYCOMMAND | (m_cpuImage ? MF_ENABLED : MF_GRAYED);
     menu.EnableMenuItem(IDM_FILE_SAVEAS, imageState);
@@ -976,6 +987,75 @@ LRESULT MainWindow::OnEditTransform(WORD, WORD id, HWND, BOOL&)
 {
     ApplyTransform(id);
     return 0;
+}
+
+LRESULT MainWindow::OnAssocRegister(WORD, WORD, HWND, BOOL&)
+{
+    RegisterAssociations(true);
+    return 0;
+}
+
+LRESULT MainWindow::OnAssocUnregister(WORD, WORD, HWND, BOOL&)
+{
+    const HRESULT hr = FileAssociation::Unregister();
+    if (FAILED(hr))
+    {
+        const std::wstring text = std::format(L"{} (0x{:08X})", LoadStringResource(IDS_ERR_ASSOC),
+                                              static_cast<unsigned>(hr));
+        MessageBoxW(text.c_str(), LoadStringResource(IDS_APP_TITLE).c_str(),
+                    MB_OK | MB_ICONERROR);
+        return 0;
+    }
+    MessageBoxW(LoadStringResource(IDS_ASSOC_UNREGISTERED).c_str(),
+                LoadStringResource(IDS_APP_TITLE).c_str(), MB_OK | MB_ICONINFORMATION);
+    return 0;
+}
+
+LRESULT MainWindow::OnAssocSettings(WORD, WORD, HWND, BOOL&)
+{
+    FileAssociation::OpenDefaultAppsSettings();
+    return 0;
+}
+
+// Startup check: if the associations were registered from a different exe
+// location (the folder was moved or renamed), offer to repair them once.
+LRESULT MainWindow::OnAssocCheck(UINT, WPARAM, LPARAM, BOOL&)
+{
+    const FileAssociation::Status status = FileAssociation::Query();
+    if (!status.registered || status.exePath.empty()
+        || _wcsicmp(status.exePath.c_str(), FileAssociation::CurrentExePath().c_str()) == 0)
+    {
+        return 0;
+    }
+    if (MessageBoxW(LoadStringResource(IDS_ASSOC_MOVED).c_str(),
+                    LoadStringResource(IDS_APP_TITLE).c_str(), MB_YESNO | MB_ICONQUESTION)
+        == IDYES)
+    {
+        RegisterAssociations(false);
+    }
+    return 0;
+}
+
+void MainWindow::RegisterAssociations(bool offerSettings)
+{
+    const HRESULT hr =
+        FileAssociation::Register(m_wicFactory.get(), LoadStringResource(IDS_ASSOC_DESCRIPTION),
+                                  LoadStringResource(IDS_ASSOC_TYPENAME));
+    if (FAILED(hr))
+    {
+        const std::wstring text = std::format(L"{} (0x{:08X})", LoadStringResource(IDS_ERR_ASSOC),
+                                              static_cast<unsigned>(hr));
+        MessageBoxW(text.c_str(), LoadStringResource(IDS_APP_TITLE).c_str(),
+                    MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (offerSettings
+        && MessageBoxW(LoadStringResource(IDS_ASSOC_REGISTERED).c_str(),
+                       LoadStringResource(IDS_APP_TITLE).c_str(), MB_YESNO | MB_ICONQUESTION)
+               == IDYES)
+    {
+        FileAssociation::OpenDefaultAppsSettings();
+    }
 }
 
 LRESULT MainWindow::OnSortChanged(WORD, WORD id, HWND, BOOL&)

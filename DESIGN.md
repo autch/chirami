@@ -144,7 +144,7 @@ Direct3D 12 はこの用途ではオーバーキル。使わない。
 - 動画再生（静止画とアニメーション系のみ）
 - ネットワーク（http/https URL）・クラウド連携
 
-## ファイルの関連付け（設計決定 2026-07、未実装 — Phase 4 ステップ 22）
+## ファイルの関連付け（設計決定 2026-07、実装済み — Phase 4 ステップ 22）
 
 ポータブル性（管理者権限不要・きれいに消せる）を崩さずに、関連付けをオプトイン機能として提供する。
 
@@ -156,7 +156,7 @@ Windows 10 以降、既定アプリの選択（UserChoice）はハッシュで�
 すべて HKCU に書き込む。管理者権限は不要。
 
 - `HKCU\Software\Classes\chirami.AssocFile.<EXT>` — 拡張子ごとの ProgID
-  - `FriendlyTypeName`、`DefaultIcon`（exe を指す）、`shell\open\command = "<exe パス>" "%1"`
+  - `FriendlyTypeName`、`DefaultIcon`（専用アイコンができるまでは OS 標準の画像アイコン imageres.dll,-72 を指す）、`shell\open\command = "<exe パス>" "%1"`
   - `shellex\{E357FCCD-A995-4576-B01F-234630154E96}` に OS 標準のフォトサムネイルプロバイダ `{C7657C4A-9F68-40fa-A4DF-96BC08EB3551}` を指定。WIC で読める形式のサムネイルを OS 実装が生成する。OneDrive のクラウド専用ファイル（プレースホルダ）でもサムネイルが出るようになる。自前 COM 実装ではなく既存 CLSID の参照なので regsvr32 不要
 - `HKCU\Software\chirami\Capabilities` — ApplicationName / ApplicationDescription（STRINGTABLE から取得、日英）+ `FileAssociations`（拡張子 → ProgID）。登録時の exe パスもここに記録する（移動検出用）
 - `HKCU\Software\RegisteredApplications\chirami = Software\chirami\Capabilities`
@@ -286,4 +286,4 @@ END
     - 配布 ZIP: turbojpeg.dll（削除で無効化可）+ licenses/libjpeg-turbo.txt（vcpkg の copyright = IJG/BSD/zlib の 3 ライセンス併記）+ LICENSE（chirami 本体の MIT）。README に IJG 由来の一文を記載
 20. HDR 対応（DXGI SwapChain 移行）（完了。詳細はアーキテクチャ方針 > レンダリングを参照）
 21. 追加フォーマット対応の検討（ライセンスを精査の上）
-22. ファイルの関連付け登録（HKCU のみ・オプトイン。「ファイルの関連付け」セクション参照）
+22. ファイルの関連付け登録（完了。HKCU のみ・オプトイン。ファイルメニューの「関連付け」サブメニューから登録・更新/解除/既定のアプリ設定を開く、を提供。詳細は「ファイルの関連付け」セクション参照）

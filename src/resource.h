@@ -20,6 +20,12 @@
 #define IDS_ABOUT_TJ_LOADED     117
 #define IDS_ABOUT_TJ_MISSING    118
 #define IDS_ABOUT_FORMATS       119
+#define IDS_ASSOC_TYPENAME      120
+#define IDS_ASSOC_DESCRIPTION   121
+#define IDS_ASSOC_REGISTERED    122
+#define IDS_ASSOC_UNREGISTERED  123
+#define IDS_ASSOC_MOVED         124
+#define IDS_ERR_ASSOC           125
 
 #define IDR_MAINMENU            200
 
@@ -52,3 +58,6 @@
 #define IDM_SORT_SIZE           40403
 #define IDM_SORT_ASC            40404
 #define IDM_SORT_DESC           40405
+#define IDM_ASSOC_REGISTER      40501
+#define IDM_ASSOC_UNREGISTER    40502
+#define IDM_ASSOC_SETTINGS      40503
