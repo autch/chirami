@@ -98,6 +98,17 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
     m_menu = CMenuHandle(LoadMenuW(_Module.GetResourceInstance(), MAKEINTRESOURCEW(IDR_MAINMENU)));
     SetMenu(m_menu);
 
+    // Title bar / taskbar / Alt-Tab icons at the DPI-correct sizes.
+    const HINSTANCE instance = _Module.GetResourceInstance();
+    SetIcon(static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_CHIRAMI), IMAGE_ICON,
+                                          GetSystemMetricsForDpi(SM_CXICON, m_dpi),
+                                          GetSystemMetricsForDpi(SM_CYICON, m_dpi), 0)),
+            TRUE);
+    SetIcon(static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_CHIRAMI), IMAGE_ICON,
+                                          GetSystemMetricsForDpi(SM_CXSMICON, m_dpi),
+                                          GetSystemMetricsForDpi(SM_CYSMICON, m_dpi), 0)),
+            FALSE);
+
     DragAcceptFiles(TRUE);
 
     // Handled after the window is up so the prompt (if any) appears over it.

@@ -156,7 +156,7 @@ Windows 10 以降、既定アプリの選択（UserChoice）はハッシュで�
 すべて HKCU に書き込む。管理者権限は不要。
 
 - `HKCU\Software\Classes\chirami.AssocFile.<EXT>` — 拡張子ごとの ProgID
-  - `FriendlyTypeName`、`DefaultIcon`（専用アイコンができるまでは OS 標準の画像アイコン imageres.dll,-72 を指す）、`shell\open\command = "<exe パス>" "%1"`
+  - `FriendlyTypeName`、`DefaultIcon`（exe 埋め込みのアプリアイコンを指す）、`shell\open\command = "<exe パス>" "%1"`
   - `shellex\{E357FCCD-A995-4576-B01F-234630154E96}` に OS 標準のフォトサムネイルプロバイダ `{C7657C4A-9F68-40fa-A4DF-96BC08EB3551}` を指定。WIC で読める形式のサムネイルを OS 実装が生成する。OneDrive のクラウド専用ファイル（プレースホルダ）でもサムネイルが出るようになる。自前 COM 実装ではなく既存 CLSID の参照なので regsvr32 不要
 - `HKCU\Software\chirami\Capabilities` — ApplicationName / ApplicationDescription（STRINGTABLE から取得、日英）+ `FileAssociations`（拡張子 → ProgID）。登録時の exe パスもここに記録する（移動検出用）
 - `HKCU\Software\RegisteredApplications\chirami = Software\chirami\Capabilities`
@@ -189,7 +189,7 @@ Windows 10 以降、既定アプリの選択（UserChoice）はハッシュで�
 
 - 既定への昇格は必ずユーザー操作（設計上の意図でもある）
 - サムネイルは WIC で読める形式のみ（chirami 本体と同じ制約）
-- 専用アプリアイコンは未作成。エクスプローラでの見栄えのため、関連付け実装より先にアイコンを用意する価値がある
+- アプリアイコンは 2026-07 に追加（src/chirami.ico、原画は icon/ 以下）。exe・ウィンドウ・ProgID の DefaultIcon で共用
 
 ## 配布形態
 

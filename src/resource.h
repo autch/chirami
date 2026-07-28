@@ -1,5 +1,7 @@
 #pragma once
 
+#define IDI_CHIRAMI             1
+
 #define IDS_APP_TITLE           100
 #define IDS_STATUS_LOADING      101
 #define IDS_ERR_FILE_OPEN       102

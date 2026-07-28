@@ -188,11 +188,8 @@ try
     const std::vector<std::wstring> extensions = SortedExtensions(factory);
     RETURN_HR_IF(E_UNEXPECTED, extensions.empty());
 
-    // The exe has no icon resource yet; use the OS generic image icon until
-    // a dedicated app icon exists.
-    WCHAR systemDir[MAX_PATH];
-    RETURN_LAST_ERROR_IF(GetSystemDirectoryW(systemDir, ARRAYSIZE(systemDir)) == 0);
-    const std::wstring defaultIcon = std::wstring(systemDir) + L"\\imageres.dll,-72";
+    // ProgID icon: the app icon embedded in the exe.
+    const std::wstring defaultIcon = L"\"" + exe + L"\",0";
 
     for (const std::wstring& extension : extensions)
     {
