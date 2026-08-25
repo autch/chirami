@@ -129,6 +129,7 @@ BEGIN
             MENUITEM "降順(&E)",                  IDM_SORT_DESC
         END
         MENUITEM SEPARATOR
+        MENUITEM "背景色(&B)...",                 IDM_VIEW_BGCOLOR
         MENUITEM "プロパティ(&P)\tI",             IDM_VIEW_PROPERTIES
         MENUITEM "フルスクリーン(&U)\tF11",       IDM_VIEW_FULLSCREEN
     END
@@ -261,6 +262,7 @@ BEGIN
             MENUITEM "D&escending",               IDM_SORT_DESC
         END
         MENUITEM SEPARATOR
+        MENUITEM "&Background Color...",          IDM_VIEW_BGCOLOR
         MENUITEM "&Properties\tI",                IDM_VIEW_PROPERTIES
         MENUITEM "F&ullscreen\tF11",              IDM_VIEW_FULLSCREEN
     END

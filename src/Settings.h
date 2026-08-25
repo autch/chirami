@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -19,6 +20,9 @@ struct Settings
 
     SortKey sortKey = SortKey::Name;
     bool sortDescending = false;
+
+    // COLORREF layout (0x00BBGGRR); stored in the INI as sRGB "RRGGBB" hex.
+    uint32_t backgroundColor = 0x000000;  // black
 
     static std::filesystem::path FilePath();  // %APPDATA%\chirami\chirami.ini
     static Settings Load();

@@ -5,6 +5,7 @@
 #include "TurboJpeg.h"
 #include "resource.h"
 
+#include <commdlg.h>      // ChooseColorW
 #include <d2d1effects.h>  // CLSID_D2D1ColorMatrix
 #include <shellapi.h>     // DragAcceptFiles, DragQueryFileW
 #include <shobjidl.h>     // IFileOpenDialog, IFileSaveDialog
@@ -1155,6 +1156,37 @@ LRESULT MainWindow::OnViewProperties(WORD, WORD, HWND, BOOL&)
 {
     TogglePropertiesWindow();
     return 0;
+}
+
+LRESULT MainWindow::OnViewBackgroundColor(WORD, WORD, HWND, BOOL&)
+{
+    CHOOSECOLORW dialog{sizeof(dialog)};
+    dialog.hwndOwner = m_hWnd;
+    dialog.rgbResult = m_settings.backgroundColor;
+    dialog.lpCustColors = m_customColors;
+    dialog.Flags = CC_RGBINIT | CC_FULLOPEN;
+    if (ChooseColorW(&dialog))
+    {
+        m_settings.backgroundColor = dialog.rgbResult;
+        m_settings.Save();
+        Invalidate(FALSE);
+    }
+    return 0;
+}
+
+// The swap chain is linear scRGB; the user picks an sRGB color, so decode
+// the transfer function here. The SDR white-level boost then scales the
+// background together with the rest of the scene, keeping it in line with
+// other windows on HDR displays.
+D2D1_COLOR_F MainWindow::BackgroundColorLinear() const
+{
+    const auto toLinear = [](uint32_t channel) {
+        const float c = static_cast<float>(channel) / 255.0f;
+        return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+    };
+    const uint32_t color = m_settings.backgroundColor;  // COLORREF: 0x00BBGGRR
+    return D2D1::ColorF(toLinear(color & 0xFF), toLinear((color >> 8) & 0xFF),
+                        toLinear((color >> 16) & 0xFF));
 }
 
 void MainWindow::TogglePropertiesWindow()
@@ -2414,7 +2446,7 @@ void MainWindow::Render()
     m_d2dContext->SetTarget(applyBoost ? m_sceneBitmap.get() : m_targetBitmap.get());
 
     m_d2dContext->BeginDraw();
-    m_d2dContext->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+    m_d2dContext->Clear(BackgroundColorLinear());
 
     // The previous image stays up while the next one loads (or fails); the
     // status text overlays it, which avoids flicker when flipping quickly.

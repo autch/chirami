@@ -33,6 +33,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 - 設定は %APPDATA% の INI ファイルに保存（レジストリ不使用） / Settings live in an INI file under %APPDATA% (no registry)
 - 関連付けの登録はオプトイン（メニューから HKCU のみに書き込み、管理者権限不要。既定にするのは Windows の「既定のアプリ」設定から。解除メニューと解除用 .reg ファイルの自動生成で、いつでも元に戻せる） / Opt-in file association (written to HKCU only from the menu, no admin rights; making chirami the default happens in Windows "Default apps". An unregister menu and an auto-generated undo .reg file revert everything at any time)
 - 画像を開くたび・ズームのたびにウィンドウサイズが表示に追従（収まらなければスクロールバー） / The window tracks the displayed size on every open and zoom, with scrollbars once it can't
+- 背景色（余白・透過部分の下地）を表示メニューから変更可能（HDR ディスプレイでも他アプリと同じ見た目になるよう補正） / Configurable background color (View menu) for the margins and transparent areas, corrected to match other apps on HDR displays
 - フルスクリーン表示 / Fullscreen mode
 - Per-Monitor V2 の DPI 対応（等倍表示は表示スケール設定に依らず dot-by-dot） / Per-Monitor V2 DPI awareness (actual size is true dot-by-dot regardless of display scaling)
 - 日本語 / 英語 UI（OS の言語設定に追従） / Japanese and English UI following the OS language

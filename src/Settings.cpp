@@ -4,6 +4,8 @@
 
 #include <shlobj.h>  // SHGetKnownFolderPath
 
+#include <cwchar>  // wcstoul, swprintf_s
+
 namespace
 {
 
@@ -41,6 +43,16 @@ try
                        : key == L"size" ? SortKey::Size
                                         : SortKey::Name;
     settings.sortDescending = ReadString(file, L"SortDescending", L"0") == L"1";
+
+    const std::wstring background = ReadString(file, L"BackgroundColor", L"000000");
+    wchar_t* end = nullptr;
+    const unsigned long rgb = wcstoul(background.c_str(), &end, 16);
+    if (end != background.c_str() && *end == L'\0' && rgb <= 0xFFFFFF)
+    {
+        // INI holds display-order RRGGBB; COLORREF wants 0x00BBGGRR.
+        settings.backgroundColor =
+            ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 0xFF);
+    }
     return settings;
 }
 catch (...)
@@ -63,6 +75,11 @@ try
     WritePrivateProfileStringW(kSection, L"SortKey", key, file.c_str());
     WritePrivateProfileStringW(kSection, L"SortDescending", sortDescending ? L"1" : L"0",
                                file.c_str());
+    WCHAR background[8];
+    swprintf_s(background, L"%06X",
+               ((backgroundColor & 0xFF) << 16) | (backgroundColor & 0xFF00)
+                   | ((backgroundColor >> 16) & 0xFF));
+    WritePrivateProfileStringW(kSection, L"BackgroundColor", background, file.c_str());
 }
 catch (...)
 {

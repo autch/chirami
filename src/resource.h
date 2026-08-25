@@ -70,6 +70,7 @@
 #define IDM_VIEW_ZOOMOUT        40104
 #define IDM_VIEW_FULLSCREEN     40105
 #define IDM_VIEW_PROPERTIES     40106
+#define IDM_VIEW_BGCOLOR        40107
 #define IDM_HELP_ABOUT          40201
 #define IDM_EDIT_PASTE          40301
 #define IDM_EDIT_ROTATE_CW      40302

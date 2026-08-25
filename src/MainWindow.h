@@ -71,6 +71,7 @@ public:
         COMMAND_ID_HANDLER(IDM_VIEW_ZOOMOUT, OnViewZoomOut)
         COMMAND_ID_HANDLER(IDM_VIEW_FULLSCREEN, OnViewFullscreen)
         COMMAND_ID_HANDLER(IDM_VIEW_PROPERTIES, OnViewProperties)
+        COMMAND_ID_HANDLER(IDM_VIEW_BGCOLOR, OnViewBackgroundColor)
         COMMAND_ID_HANDLER(IDM_ASSOC_REGISTER, OnAssocRegister)
         COMMAND_ID_HANDLER(IDM_ASSOC_UNREGISTER, OnAssocUnregister)
         COMMAND_ID_HANDLER(IDM_ASSOC_SETTINGS, OnAssocSettings)
@@ -147,6 +148,7 @@ private:
     LRESULT OnViewZoomOut(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewFullscreen(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewProperties(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnViewBackgroundColor(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnAssocRegister(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnAssocUnregister(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnAssocSettings(WORD code, WORD id, HWND control, BOOL& handled);
@@ -176,6 +178,8 @@ private:
 
     float DpiScale() const { return static_cast<float>(m_dpi) / 96.0f; }
     HRESULT CreateTextFormat();
+
+    D2D1_COLOR_F BackgroundColorLinear() const;
 
     HRESULT CreateDeviceResources();
     void DiscardDeviceResources();
@@ -273,6 +277,7 @@ private:
 
     std::unique_ptr<ImageSaver> m_saver;
     Settings m_settings;
+    COLORREF m_customColors[16]{};  // ChooseColor custom slots; session only
 
     // Prefetching (Phase 3): a second loader fills m_cache with the current
     // file's neighbors so arrow-key navigation displays instantly.
