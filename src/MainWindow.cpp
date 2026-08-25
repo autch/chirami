@@ -224,6 +224,7 @@ void MainWindow::DisplayImage(const std::wstring& displayName, LoadedImage image
         m_cache.Put(std::move(m_displayedPath), std::move(m_cpuImage));
     }
     m_displayedPath = m_currentPath;
+    m_metadataPath = m_currentPath;
 
     m_cpuImage = std::move(image);
     m_tiles.clear();  // recreated from m_cpuImage on next render
@@ -235,6 +236,7 @@ void MainWindow::DisplayImage(const std::wstring& displayName, LoadedImage image
     SetWindowTextW((displayName + L" - " + LoadStringResource(IDS_APP_TITLE)).c_str());
     Invalidate(FALSE);
 
+    RequestMetadataForCurrent();
     TriggerPrefetch();
 }
 
@@ -468,6 +470,12 @@ void MainWindow::OnKeyDown(UINT key, UINT /*repeatCount*/, UINT /*flags*/)
             EnterSelectionMode(SelectionPurpose::Blackout);
         }
         break;
+    case 'I':
+        if (!control)
+        {
+            TogglePropertiesWindow();
+        }
+        break;
     case VK_F11:
     case VK_RETURN:
         ToggleFullscreen();
@@ -507,6 +515,9 @@ void MainWindow::OnInitMenuPopup(CMenuHandle menu, UINT /*index*/, BOOL sysMenu)
     menu.CheckMenuItem(IDM_VIEW_ACTUAL, MF_BYCOMMAND | (actual ? MF_CHECKED : MF_UNCHECKED));
     menu.CheckMenuItem(IDM_VIEW_FULLSCREEN,
                        MF_BYCOMMAND | (m_fullscreen ? MF_CHECKED : MF_UNCHECKED));
+    menu.CheckMenuItem(IDM_VIEW_PROPERTIES,
+                       MF_BYCOMMAND
+                           | (m_metadataWindow.IsWindow() ? MF_CHECKED : MF_UNCHECKED));
     // Only touch the registry when this popup actually holds the item.
     if (menu.GetMenuState(IDM_ASSOC_UNREGISTER, MF_BYCOMMAND) != static_cast<UINT>(-1))
     {
@@ -608,8 +619,11 @@ void MainWindow::ApplySelection()
     }
 
     // Baked into the pixels like rotate/flip: transient until saved, so the
-    // on-disk identity is dropped and the result stays out of the cache.
+    // on-disk identity is dropped and the result stays out of the cache. The
+    // shown pixels no longer match the file, so its metadata goes too.
     m_displayedPath.clear();
+    m_metadataPath.clear();
+    RequestMetadataForCurrent();
     m_tiles.clear();
 
     if (m_selectionPurpose == SelectionPurpose::Crop)
@@ -665,8 +679,11 @@ void MainWindow::ApplyTransform(WORD commandId)
         return;
     }
     // Edits are transient until saved; drop the on-disk identity so the
-    // edited pixels never enter the prefetch cache.
+    // edited pixels never enter the prefetch cache. The shown pixels no
+    // longer match the file, so its metadata goes too.
     m_displayedPath.clear();
+    m_metadataPath.clear();
+    RequestMetadataForCurrent();
     m_tiles.clear();
     ApplyAutoZoomForNewImage();  // dimensions may have swapped
     UpdateScrollBars();
@@ -893,6 +910,8 @@ void MainWindow::ShowResizeDialog()
     // Baked like the other edits: transient until saved, kept out of the cache.
     m_cpuImage = std::move(resized);
     m_displayedPath.clear();
+    m_metadataPath.clear();
+    RequestMetadataForCurrent();
     m_tiles.clear();
     ApplyAutoZoomForNewImage();
     UpdateScrollBars();
@@ -1129,6 +1148,113 @@ LRESULT MainWindow::OnViewZoomOut(WORD, WORD, HWND, BOOL&)
 LRESULT MainWindow::OnViewFullscreen(WORD, WORD, HWND, BOOL&)
 {
     ToggleFullscreen();
+    return 0;
+}
+
+LRESULT MainWindow::OnViewProperties(WORD, WORD, HWND, BOOL&)
+{
+    TogglePropertiesWindow();
+    return 0;
+}
+
+void MainWindow::TogglePropertiesWindow()
+{
+    if (m_metadataWindow.IsWindow())
+    {
+        m_metadataWindow.DestroyWindow();
+        return;
+    }
+    m_metadataWindow.Open(m_hWnd);
+    RequestMetadataForCurrent();
+}
+
+// Feeds the properties window, if open, with whatever describes the current
+// image: a background metadata read for on-disk files, or the basic facts we
+// already hold for clipboard/edited images that have no file.
+void MainWindow::RequestMetadataForCurrent()
+{
+    if (!m_metadataWindow.IsWindow())
+    {
+        return;
+    }
+    if (!m_metadataPath.empty())
+    {
+        if (!m_metadataReader)
+        {
+            m_metadataReader = std::make_unique<MetadataReader>(m_hWnd, WM_APP_METADATA_DONE,
+                                                                GetThreadUILanguage());
+        }
+        m_expectedMetadataGeneration = m_metadataReader->RequestRead(m_metadataPath);
+        return;
+    }
+    m_expectedMetadataGeneration = 0;  // no read in flight; drop stale results
+    m_metadataWindow.SetItems(BuildBasicMetadataItems());
+}
+
+// What the viewer actually decoded into and renders from: 8-bit SDR, or FP16
+// scRGB for high-precision/HDR sources. Useful alongside the file's native
+// pixel format to see which rendering path an image takes.
+MetadataItem MainWindow::DisplayFormatItem() const
+{
+    return {MetadataGroup::Image, LoadStringResource(IDS_META_DISPLAYFORMAT),
+            m_cpuImage.format == LoadedImage::Format::Rgba16F
+                ? L"64bpp RGBA half float (scRGB / HDR)"
+                : L"32bpp BGRA (SDR)"};
+}
+
+std::vector<MetadataItem> MainWindow::BuildBasicMetadataItems() const
+{
+    std::vector<MetadataItem> items;
+    if (!m_cpuImage)
+    {
+        return items;
+    }
+    items.push_back({MetadataGroup::Image, LoadStringResource(IDS_META_DIMENSIONS),
+                     std::format(L"{} × {}", m_cpuImage.width, m_cpuImage.height)});
+    items.push_back(DisplayFormatItem());
+    if (m_animationFrames.size() > 1)
+    {
+        items.push_back({MetadataGroup::Image, LoadStringResource(IDS_META_FRAMES),
+                         std::to_wstring(m_animationFrames.size())});
+    }
+    return items;
+}
+
+LRESULT MainWindow::OnMetadataDone(UINT, WPARAM, LPARAM, BOOL&)
+{
+    if (!m_metadataReader)
+    {
+        return 0;
+    }
+    auto result = m_metadataReader->TakeResult();
+    if (!result || result->generation != m_expectedMetadataGeneration
+        || !m_metadataWindow.IsWindow())
+    {
+        return 0;
+    }
+    if (result->items.empty() && FAILED(result->hr))
+    {
+        m_metadataWindow.SetError(result->hr);
+    }
+    else
+    {
+        std::vector<MetadataItem> items = std::move(result->items);
+        if (m_cpuImage)
+        {
+            // The reader reports the file's native pixel format; add how the
+            // viewer actually holds it, right below the image group's rows.
+            auto position = items.end();
+            for (auto it = items.begin(); it != items.end(); ++it)
+            {
+                if (it->group == MetadataGroup::Image)
+                {
+                    position = std::next(it);
+                }
+            }
+            items.insert(position, DisplayFormatItem());
+        }
+        m_metadataWindow.SetItems(std::move(items));
+    }
     return 0;
 }
 
@@ -2005,6 +2131,7 @@ void MainWindow::OnDestroy()
     m_scanner.reset();
     m_saver.reset();
     m_prefetcher.reset();
+    m_metadataReader.reset();
     // A menu attached to the window is destroyed with it; while fullscreen
     // it is detached and must be destroyed explicitly.
     if (m_fullscreen && !m_menu.IsNull())

@@ -35,6 +35,29 @@ BEGIN
     IDS_ASSOC_UNREGISTERED   L"関連付けを解除しました。"
     IDS_ASSOC_MOVED          L"chirami.exe の場所が関連付けの登録時から変わっています。\n現在の場所で関連付けを更新しますか?"
     IDS_ERR_ASSOC            L"関連付けの処理に失敗しました"
+    IDS_META_TITLE           L"画像のプロパティ"
+    IDS_META_COL_NAME        L"項目"
+    IDS_META_COL_VALUE       L"値"
+    IDS_META_GROUP_FILE      L"ファイル"
+    IDS_META_GROUP_IMAGE     L"画像"
+    IDS_META_GROUP_PNGTEXT   L"PNG テキスト"
+    IDS_META_GROUP_WIC       L"メタデータ"
+    IDS_META_FILENAME        L"ファイル名"
+    IDS_META_FOLDER          L"フォルダー"
+    IDS_META_FILESIZE        L"ファイルサイズ"
+    IDS_META_SIZE_FMT        L"{} ({} バイト)"
+    IDS_META_MODIFIED        L"更新日時"
+    IDS_META_CREATED         L"作成日時"
+    IDS_META_FORMAT          L"形式"
+    IDS_META_DIMENSIONS      L"サイズ (ピクセル)"
+    IDS_META_PIXELFORMAT     L"ピクセル形式"
+    IDS_META_DPI             L"解像度 (DPI)"
+    IDS_META_FRAMES          L"フレーム数"
+    IDS_META_COMPRESSED      L"(圧縮テキスト — 表示未対応)"
+    IDS_META_COPY_VALUE      L"値をコピー(&C)\tCtrl+C"
+    IDS_META_COPY_ALL        L"すべてコピー(&A)"
+    IDS_META_ERROR           L"メタデータを取得できません"
+    IDS_META_DISPLAYFORMAT   L"表示形式"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -106,6 +129,7 @@ BEGIN
             MENUITEM "降順(&E)",                  IDM_SORT_DESC
         END
         MENUITEM SEPARATOR
+        MENUITEM "プロパティ(&P)\tI",             IDM_VIEW_PROPERTIES
         MENUITEM "フルスクリーン(&U)\tF11",       IDM_VIEW_FULLSCREEN
     END
     POPUP "ヘルプ(&H)"
@@ -143,6 +167,29 @@ BEGIN
     IDS_ASSOC_UNREGISTERED   L"File associations removed."
     IDS_ASSOC_MOVED          L"chirami.exe has moved since file associations were registered.\nUpdate the associations to the current location?"
     IDS_ERR_ASSOC            L"File association operation failed"
+    IDS_META_TITLE           L"Image Properties"
+    IDS_META_COL_NAME        L"Property"
+    IDS_META_COL_VALUE       L"Value"
+    IDS_META_GROUP_FILE      L"File"
+    IDS_META_GROUP_IMAGE     L"Image"
+    IDS_META_GROUP_PNGTEXT   L"PNG text"
+    IDS_META_GROUP_WIC       L"Metadata"
+    IDS_META_FILENAME        L"File name"
+    IDS_META_FOLDER          L"Folder"
+    IDS_META_FILESIZE        L"File size"
+    IDS_META_SIZE_FMT        L"{} ({} bytes)"
+    IDS_META_MODIFIED        L"Modified"
+    IDS_META_CREATED         L"Created"
+    IDS_META_FORMAT          L"Format"
+    IDS_META_DIMENSIONS      L"Size (pixels)"
+    IDS_META_PIXELFORMAT     L"Pixel format"
+    IDS_META_DPI             L"Resolution (DPI)"
+    IDS_META_FRAMES          L"Frame count"
+    IDS_META_COMPRESSED      L"(compressed text — display not supported)"
+    IDS_META_COPY_VALUE      L"&Copy Value\tCtrl+C"
+    IDS_META_COPY_ALL        L"Copy &All"
+    IDS_META_ERROR           L"Cannot read metadata"
+    IDS_META_DISPLAYFORMAT   L"Display format"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -214,6 +261,7 @@ BEGIN
             MENUITEM "D&escending",               IDM_SORT_DESC
         END
         MENUITEM SEPARATOR
+        MENUITEM "&Properties\tI",                IDM_VIEW_PROPERTIES
         MENUITEM "F&ullscreen\tF11",              IDM_VIEW_FULLSCREEN
     END
     POPUP "&Help"

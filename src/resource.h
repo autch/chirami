@@ -28,6 +28,29 @@
 #define IDS_ASSOC_UNREGISTERED  123
 #define IDS_ASSOC_MOVED         124
 #define IDS_ERR_ASSOC           125
+#define IDS_META_TITLE          126
+#define IDS_META_COL_NAME       127
+#define IDS_META_COL_VALUE      128
+#define IDS_META_GROUP_FILE     129
+#define IDS_META_GROUP_IMAGE    130
+#define IDS_META_GROUP_PNGTEXT  131
+#define IDS_META_GROUP_WIC      132
+#define IDS_META_FILENAME       133
+#define IDS_META_FOLDER         134
+#define IDS_META_FILESIZE       135
+#define IDS_META_SIZE_FMT       136
+#define IDS_META_MODIFIED       137
+#define IDS_META_CREATED        138
+#define IDS_META_FORMAT         139
+#define IDS_META_DIMENSIONS     140
+#define IDS_META_PIXELFORMAT    141
+#define IDS_META_DPI            142
+#define IDS_META_FRAMES         143
+#define IDS_META_COMPRESSED     144
+#define IDS_META_COPY_VALUE     145
+#define IDS_META_COPY_ALL       146
+#define IDS_META_ERROR          147
+#define IDS_META_DISPLAYFORMAT  148
 
 #define IDR_MAINMENU            200
 
@@ -46,6 +69,7 @@
 #define IDM_VIEW_ZOOMIN         40103
 #define IDM_VIEW_ZOOMOUT        40104
 #define IDM_VIEW_FULLSCREEN     40105
+#define IDM_VIEW_PROPERTIES     40106
 #define IDM_HELP_ABOUT          40201
 #define IDM_EDIT_PASTE          40301
 #define IDM_EDIT_ROTATE_CW      40302

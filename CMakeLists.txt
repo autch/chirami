@@ -19,6 +19,8 @@ add_executable(chirami WIN32
     src/MainWindow.cpp
     src/ImageLoader.cpp
     src/ImageSaver.cpp
+    src/MetadataReader.cpp
+    src/MetadataWindow.cpp
     src/TurboJpeg.cpp
     src/ImageTransform.cpp
     src/FolderScanner.cpp
@@ -46,6 +48,7 @@ target_link_libraries(chirami PRIVATE
     windowscodecs
     shlwapi
     shell32
+    comctl32
 )
 
 target_compile_options(chirami PRIVATE

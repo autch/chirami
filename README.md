@@ -28,6 +28,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 - ファイルでもフォルダでも開ける（D&D・関連付け・コマンドライン。フォルダは中の最初の画像を表示） / Opens files and folders alike (drag & drop, file association, command line; a folder opens to its first image)
 - フォーマットを変換して保存（PNG/JPEG/BMP/TIFF）、クリップボードからの貼り付け、90 度回転・反転 / Save as PNG/JPEG/BMP/TIFF, paste from the clipboard, rotate/flip
 - クロップと黒塗り（矩形選択は 8 方向ハンドルでリサイズ・ドラッグで移動と、後から調整可能） / Crop and blackout with a rubber-band selection that stays adjustable: resize via 8 handles, move by dragging
+- 画像のプロパティウィンドウ（I キー。ファイル情報・画像情報・EXIF などのメタデータを一覧し、←→での画像切り替えに追従。PNG の tEXt/iTXt テキストチャンクも表示するので、AI 生成画像に埋め込まれたプロンプトを読んでコピーできる） / Image properties window (press I; lists file info, image info, and metadata such as EXIF, and follows arrow-key navigation. PNG tEXt/iTXt text chunks are shown too, so prompts embedded in AI-generated images can be read and copied)
 - リサイズはピクセルでも % でも指定可能（4 つの入力欄がライブ連動。縦横比維持なら片方だけの指定で残りはなりゆき） / Resize by pixels or percent through four live-linked fields; with the aspect lock, entering any one value settles the rest
 - 設定は %APPDATA% の INI ファイルに保存（レジストリ不使用） / Settings live in an INI file under %APPDATA% (no registry)
 - 関連付けの登録はオプトイン（メニューから HKCU のみに書き込み、管理者権限不要。既定にするのは Windows の「既定のアプリ」設定から。解除メニューと解除用 .reg ファイルの自動生成で、いつでも元に戻せる） / Opt-in file association (written to HKCU only from the menu, no admin rights; making chirami the default happens in Windows "Default apps". An unregister menu and an auto-generated undo .reg file revert everything at any time)
@@ -55,6 +56,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 | H / V | 左右反転 / 上下反転 / flip horizontal / vertical |
 | C / B | クロップ / 黒塗りの範囲選択を開始 / start crop / blackout selection |
 | Ctrl + R | リサイズ（ピクセル / % 指定） / resize (pixel / percent dialog) |
+| I | 画像のプロパティを開く / 閉じる / toggle the image properties window |
 | Enter または選択内ダブルクリック / Enter or double-click inside | 選択を適用 / apply the selection |
 | Esc | 範囲選択の解除、フルスクリーン解除、または終了 / cancel the selection, leave fullscreen, or quit |
 | ドラッグ＆ドロップ / drop a file or folder | ファイルまたはフォルダを開く / open the dropped file or folder |

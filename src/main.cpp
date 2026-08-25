@@ -3,6 +3,7 @@
 #include "Settings.h"
 #include "resource.h"
 
+#include <commctrl.h>  // InitCommonControlsEx (properties window ListView)
 #include <shellapi.h>  // CommandLineToArgvW
 
 CAppModule _Module;
@@ -34,6 +35,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR /*cmdLine*/, int cmdS
     ApplyLanguage(settings);
 
     auto coInit = wil::CoInitializeEx(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+    INITCOMMONCONTROLSEX commonControls{sizeof(commonControls), ICC_LISTVIEW_CLASSES};
+    InitCommonControlsEx(&commonControls);
 
     THROW_IF_FAILED(_Module.Init(nullptr, hInstance));
     auto moduleTerm = wil::scope_exit([] { _Module.Term(); });

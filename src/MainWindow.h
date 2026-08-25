@@ -6,6 +6,8 @@
 #include "ImageLoader.h"
 #include "ImageSaver.h"
 #include "LoadedImage.h"
+#include "MetadataReader.h"
+#include "MetadataWindow.h"
 #include "SelectionState.h"
 #include "Settings.h"
 #include "resource.h"
@@ -20,6 +22,7 @@ inline constexpr UINT WM_APP_FOLDER_SCANNED = WM_APP + 2;
 inline constexpr UINT WM_APP_SAVE_DONE = WM_APP + 3;
 inline constexpr UINT WM_APP_PREFETCH_DONE = WM_APP + 4;
 inline constexpr UINT WM_APP_ASSOC_CHECK = WM_APP + 5;
+inline constexpr UINT WM_APP_METADATA_DONE = WM_APP + 6;
 
 class MainWindow : public CWindowImpl<MainWindow>
 {
@@ -52,6 +55,7 @@ public:
         MESSAGE_HANDLER(WM_APP_SAVE_DONE, OnSaveDone)
         MESSAGE_HANDLER(WM_APP_PREFETCH_DONE, OnPrefetchDone)
         MESSAGE_HANDLER(WM_APP_ASSOC_CHECK, OnAssocCheck)
+        MESSAGE_HANDLER(WM_APP_METADATA_DONE, OnMetadataDone)
         COMMAND_ID_HANDLER(IDM_FILE_OPEN, OnFileOpen)
         COMMAND_ID_HANDLER(IDM_FILE_SAVEAS, OnFileSaveAs)
         COMMAND_ID_HANDLER(IDM_FILE_EXIT, OnFileExit)
@@ -66,6 +70,7 @@ public:
         COMMAND_ID_HANDLER(IDM_VIEW_ZOOMIN, OnViewZoomIn)
         COMMAND_ID_HANDLER(IDM_VIEW_ZOOMOUT, OnViewZoomOut)
         COMMAND_ID_HANDLER(IDM_VIEW_FULLSCREEN, OnViewFullscreen)
+        COMMAND_ID_HANDLER(IDM_VIEW_PROPERTIES, OnViewProperties)
         COMMAND_ID_HANDLER(IDM_ASSOC_REGISTER, OnAssocRegister)
         COMMAND_ID_HANDLER(IDM_ASSOC_UNREGISTER, OnAssocUnregister)
         COMMAND_ID_HANDLER(IDM_ASSOC_SETTINGS, OnAssocSettings)
@@ -141,6 +146,7 @@ private:
     LRESULT OnViewZoomIn(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewZoomOut(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnViewFullscreen(WORD code, WORD id, HWND control, BOOL& handled);
+    LRESULT OnViewProperties(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnAssocRegister(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnAssocUnregister(WORD code, WORD id, HWND control, BOOL& handled);
     LRESULT OnAssocSettings(WORD code, WORD id, HWND control, BOOL& handled);
@@ -274,12 +280,28 @@ private:
     ImageCache m_cache;
     std::filesystem::path m_displayedPath;   // identity of m_cpuImage; empty
                                              // for clipboard or edited images
+    std::filesystem::path m_metadataPath;    // file whose unedited pixels are
+                                             // shown; unlike m_displayedPath it
+                                             // survives StartAnimation, so the
+                                             // properties window keeps showing
+                                             // the file's metadata
     std::filesystem::path m_prefetchPath;    // request in flight, if any
     uint64_t m_prefetchGeneration = 0;
     std::vector<std::filesystem::path> m_prefetchFailed;  // don't retry these
 
     void DisplayImage(const std::wstring& displayName, LoadedImage image);
     void TriggerPrefetch();
+
+    // Image properties window (modeless; follows the displayed image).
+    MetadataWindow m_metadataWindow;
+    std::unique_ptr<MetadataReader> m_metadataReader;  // created on first open
+    uint64_t m_expectedMetadataGeneration = 0;
+
+    void TogglePropertiesWindow();
+    void RequestMetadataForCurrent();
+    MetadataItem DisplayFormatItem() const;
+    std::vector<MetadataItem> BuildBasicMetadataItems() const;
+    LRESULT OnMetadataDone(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
 
     // Rubber-band selection for crop / blackout (Phase 3 step 16)
     enum class SelectionPurpose
