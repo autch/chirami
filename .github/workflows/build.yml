@@ -28,12 +28,19 @@ jobs:
       # read from the working tree, so fetch the commit AND move the
       # checkout onto it - otherwise ports newer than the image (e.g.
       # libjpeg-turbo 3.2.0) resolve to "no version database entry".
+      #
+      # The image's vcpkg.exe tracks the image, not our checkout: an updated
+      # tool refuses an older tree ("vcpkg-tools.json: document schema
+      # version 1 is not supported"). Re-bootstrap after the checkout so the
+      # tool version is the one the pinned tree expects.
       - name: Pin vcpkg to the manifest baseline
         shell: pwsh
         run: |
           $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
           git -C $env:VCPKG_INSTALLATION_ROOT fetch --depth 1 origin $baseline
           git -C $env:VCPKG_INSTALLATION_ROOT checkout --force $baseline
+          & "$env:VCPKG_INSTALLATION_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Configure and build (Release)
         shell: cmd

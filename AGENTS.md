@@ -41,6 +41,10 @@ the ZIP to the release assets.
   files are read from the working tree, so before configuring, `git fetch --depth 1` the
   baseline commit **and check it out** (fetch alone yields "no version database entry" for
   newer ports)
+- The image's vcpkg.exe tracks the image, not that checkout: when the image updates, a newer
+  tool can refuse the pinned (older) tree with "vcpkg-tools.json: document schema version 1
+  is not supported". After the checkout, run `bootstrap-vcpkg.bat` so the tool is the version
+  the pinned tree expects
 - turbojpeg.dll comes out of the regular manifest install (x64-chirami overlay triplet)
   and the post-build copy places it in build/release, so staging takes it from the build
   tree. Ship vcpkg's generated share/libjpeg-turbo/copyright
