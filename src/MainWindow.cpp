@@ -94,8 +94,12 @@ int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
 
     DragAcceptFiles(TRUE);
 
+#ifndef _DEBUG
     // Handled after the window is up so the prompt (if any) appears over it.
+    // Debug builds skip this: they usually run from a different folder than
+    // the registered exe, and the prompt would fire on every launch.
     PostMessage(WM_APP_ASSOC_CHECK);
+#endif
     return 0;
 }
 
@@ -1033,6 +1037,7 @@ LRESULT MainWindow::OnAssocSettings(WORD, WORD, HWND, BOOL&)
 // location (the folder was moved or renamed), offer to repair them once.
 LRESULT MainWindow::OnAssocCheck(UINT, WPARAM, LPARAM, BOOL&)
 {
+#ifndef _DEBUG
     const FileAssociation::Status status = FileAssociation::Query();
     if (!status.registered || status.exePath.empty()
         || PathsEqualNoCase(status.exePath, FileAssociation::CurrentExePath()))
@@ -1045,6 +1050,7 @@ LRESULT MainWindow::OnAssocCheck(UINT, WPARAM, LPARAM, BOOL&)
     {
         RegisterAssociations(false);
     }
+#endif
     return 0;
 }
 
