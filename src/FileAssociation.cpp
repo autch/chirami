@@ -1,11 +1,11 @@
 #include "FileAssociation.h"
+#include "StringUtil.h"
 #include "WicDecoders.h"
 
 #include <shellapi.h>  // ShellExecuteW
 #include <shlobj.h>    // SHGetKnownFolderPath, SHChangeNotify
 
 #include <algorithm>
-#include <cwctype>
 #include <filesystem>
 #include <format>
 #include <optional>
@@ -56,10 +56,7 @@ std::optional<std::wstring> GetString(PCWSTR subkey, PCWSTR name)
 // ".jpg" -> "JPG"
 std::wstring ExtensionUpper(const std::wstring& extension)
 {
-    std::wstring upper = extension.substr(1);
-    std::transform(upper.begin(), upper.end(), upper.begin(),
-                   [](wchar_t ch) { return static_cast<wchar_t>(std::towupper(ch)); });
-    return upper;
+    return ToUpper(extension.substr(1));
 }
 
 std::wstring ProgIdFor(const std::wstring& extension)

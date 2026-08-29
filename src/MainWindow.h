@@ -10,6 +10,7 @@
 #include "MetadataWindow.h"
 #include "SelectionState.h"
 #include "Settings.h"
+#include "ViewLayout.h"
 #include "resource.h"
 
 #include <filesystem>
@@ -92,26 +93,6 @@ private:
         Error     // m_statusText overlays the previous image, if any
     };
 
-    enum class ZoomMode
-    {
-        Fit,         // shrink to fit the window, never upscale (scrollbars off)
-        ActualSize,  // dot-by-dot
-        Custom       // user-driven zoom factor (m_zoomScale)
-    };
-
-    // Where and how large the image appears in the client area. Pan values
-    // are clamped against maxPan when this is computed.
-    struct ViewLayout
-    {
-        float scale = 0.0f;
-        float displayWidth = 0.0f;   // image size * scale
-        float displayHeight = 0.0f;
-        float destX = 0.0f;          // top-left of the image in client coords
-        float destY = 0.0f;
-        float maxPanX = 0.0f;        // 0 when the image fits on that axis
-        float maxPanY = 0.0f;
-    };
-
     int OnCreate(LPCREATESTRUCT createStruct);
     void OnSize(UINT type, CSize size);
     void OnPaint(CDCHandle dc);
@@ -167,7 +148,8 @@ private:
     void AutoFitWindowAfterZoom();
     void ResizeWindowToClient(int clientWidth, int clientHeight);
 
-    ViewLayout ComputeLayout();
+    ViewLayout ComputeLayout() const;
+    void CommitPan(const ViewLayout& layout);
     void UpdateScrollBars();
     void SyncScrollPositions();
     void UpdateView();

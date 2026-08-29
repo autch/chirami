@@ -1,19 +1,5 @@
 #include "WicDecoders.h"
-
-#include <algorithm>
-#include <cwctype>
-
-namespace
-{
-
-std::wstring ToLower(std::wstring text)
-{
-    std::transform(text.begin(), text.end(), text.begin(),
-                   [](wchar_t ch) { return static_cast<wchar_t>(std::towlower(ch)); });
-    return text;
-}
-
-}  // namespace
+#include "StringUtil.h"
 
 std::unordered_set<std::wstring> QueryWicDecoderExtensions(IWICImagingFactory* factory)
 {

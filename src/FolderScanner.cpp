@@ -1,23 +1,11 @@
 #include "FolderScanner.h"
+#include "StringUtil.h"
 #include "WicDecoders.h"
 
 #include <shlwapi.h>  // StrCmpLogicalW
 
 #include <algorithm>
-#include <cwctype>
 #include <utility>
-
-namespace
-{
-
-std::wstring ToLower(std::wstring text)
-{
-    std::transform(text.begin(), text.end(), text.begin(),
-                   [](wchar_t ch) { return static_cast<wchar_t>(std::towlower(ch)); });
-    return text;
-}
-
-}  // namespace
 
 FolderScanner::FolderScanner(HWND notifyWindow, UINT notifyMessage)
     : m_notifyWindow(notifyWindow),

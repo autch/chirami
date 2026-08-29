@@ -1,4 +1,6 @@
 #include "MetadataReader.h"
+#include "FileIo.h"
+#include "StringUtil.h"
 #include "resource.h"
 
 #include <shlwapi.h>  // SHCreateMemStream, StrFormatByteSizeW
@@ -12,8 +14,6 @@
 namespace
 {
 
-constexpr DWORD kReadChunkBytes = 1u << 20;  // 1 MiB
-
 // Sanity caps: a hostile file must not turn the properties window into a
 // memory hog or an endless enumeration.
 constexpr size_t kMaxValueChars = 256 * 1024;
@@ -21,13 +21,6 @@ constexpr size_t kMaxWicItems = 512;
 constexpr int kMaxWicDepth = 8;
 constexpr size_t kMaxVectorElements = 32;
 constexpr size_t kMaxBlobBytes = 32;  // shown as hex before eliding
-
-std::wstring LoadStringResource(UINT id)
-{
-    WCHAR buffer[512];
-    const int length = LoadStringW(_Module.GetResourceInstance(), id, buffer, ARRAYSIZE(buffer));
-    return std::wstring(buffer, static_cast<size_t>(std::max(length, 0)));
-}
 
 // UTF-8 first, then code page 1252. PNG tEXt is Latin-1 by spec, but AI
 // tools (ComfyUI and friends) routinely write UTF-8 into it; EXIF ASCII
@@ -804,25 +797,9 @@ try
 
     RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE), fileSize > UINT_MAX);
 
-    // Chunked read with cancellation points, same as ImageLoader: metadata
-    // for a file on a slow share must not wedge this worker on a stale
-    // request.
+    // Chunked so a stale request on a slow share does not wedge this worker.
     std::vector<uint8_t> data(static_cast<size_t>(fileSize));
-    size_t offset = 0;
-    while (offset < data.size())
-    {
-        if (ShouldAbort(stopToken))
-        {
-            return HRESULT_FROM_WIN32(ERROR_CANCELLED);
-        }
-        const DWORD toRead =
-            static_cast<DWORD>(std::min<size_t>(kReadChunkBytes, data.size() - offset));
-        DWORD read = 0;
-        RETURN_IF_WIN32_BOOL_FALSE(
-            ReadFile(file.get(), data.data() + offset, toRead, &read, nullptr));
-        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_HANDLE_EOF), read == 0);
-        offset += read;
-    }
+    RETURN_IF_FAILED(ReadFileChunked(file.get(), data, [&] { return ShouldAbort(stopToken); }));
 
     // --- Image group ------------------------------------------------------
     wil::com_ptr<IStream> stream;

@@ -142,9 +142,7 @@ HRESULT ResizeImage(IWICImagingFactory* factory, const LoadedImage& source, uint
                     uint32_t height, LoadedImage& out) noexcept
 try
 {
-    const bool half = source.format == LoadedImage::Format::Rgba16F;
-    const WICPixelFormatGUID wicFormat =
-        half ? GUID_WICPixelFormat64bppPRGBAHalf : GUID_WICPixelFormat32bppPBGRA;
+    const WICPixelFormatGUID wicFormat = source.WicPixelFormat();
 
     wil::com_ptr<IWICBitmap> bitmap;
     RETURN_IF_FAILED(factory->CreateBitmapFromMemory(

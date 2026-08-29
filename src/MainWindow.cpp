@@ -2,6 +2,7 @@
 #include "FileAssociation.h"
 #include "ImageTransform.h"
 #include "ResizeDialog.h"
+#include "StringUtil.h"
 #include "TurboJpeg.h"
 #include "resource.h"
 
@@ -12,7 +13,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cwctype>
 #include <format>
 
 namespace
@@ -24,13 +24,6 @@ constexpr float kZoomStep = 1.25f;
 constexpr float kScrollLine = 48.0f;    // 96-DPI pixels per scrollbar arrow
 constexpr float kWheelScroll = 96.0f;   // 96-DPI pixels per wheel notch
 constexpr float kStatusFontSize = 16.0f;  // 96-DPI pixels
-
-std::wstring LoadStringResource(UINT id)
-{
-    WCHAR buffer[256];
-    const int length = LoadStringW(_Module.GetResourceInstance(), id, buffer, ARRAYSIZE(buffer));
-    return std::wstring(buffer, length > 0 ? static_cast<size_t>(length) : 0);
-}
 
 UINT ErrorStringId(HRESULT hr)
 {
@@ -47,8 +40,7 @@ UINT ErrorStringId(HRESULT hr)
 
 GUID ContainerFormatFromExtension(std::wstring extension)
 {
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-                   [](wchar_t ch) { return static_cast<wchar_t>(std::towlower(ch)); });
+    extension = ToLower(std::move(extension));
     if (extension == L".png")
     {
         return GUID_ContainerFormatPng;
@@ -66,11 +58,6 @@ GUID ContainerFormatFromExtension(std::wstring extension)
         return GUID_ContainerFormatTiff;
     }
     return GUID_NULL;
-}
-
-bool PathsEqualNoCase(const std::filesystem::path& a, const std::filesystem::path& b)
-{
-    return _wcsicmp(a.c_str(), b.c_str()) == 0;
 }
 
 }  // namespace
@@ -345,7 +332,7 @@ ptrdiff_t MainWindow::FindFolderIndex(const std::filesystem::path& path) const
 {
     for (size_t i = 0; i < m_folderFiles.size(); ++i)
     {
-        if (_wcsicmp(m_folderFiles[i].c_str(), path.c_str()) == 0)
+        if (PathsEqualNoCase(m_folderFiles[i], path))
         {
             return static_cast<ptrdiff_t>(i);
         }
@@ -645,8 +632,7 @@ void MainWindow::ApplySelection()
 
 D2D1_POINT_2F MainWindow::ClientToImage(CPoint point, const ViewLayout& layout) const
 {
-    return {(static_cast<float>(point.x) - layout.destX) / layout.scale,
-            (static_cast<float>(point.y) - layout.destY) / layout.scale};
+    return layout.ClientToImage(static_cast<float>(point.x), static_cast<float>(point.y));
 }
 
 float MainWindow::SelectionHitTolerance(const ViewLayout& layout) const
@@ -1054,7 +1040,7 @@ LRESULT MainWindow::OnAssocCheck(UINT, WPARAM, LPARAM, BOOL&)
 {
     const FileAssociation::Status status = FileAssociation::Query();
     if (!status.registered || status.exePath.empty()
-        || _wcsicmp(status.exePath.c_str(), FileAssociation::CurrentExePath().c_str()) == 0)
+        || PathsEqualNoCase(status.exePath, FileAssociation::CurrentExePath()))
     {
         return 0;
     }
@@ -1379,11 +1365,9 @@ void MainWindow::AutoFitWindowAfterZoom()
         return;  // fit mode tracks the window by definition
     }
 
-    const float scale = m_zoomMode == ZoomMode::ActualSize ? 1.0f : m_zoomScale;
-    const int displayWidth =
-        static_cast<int>(std::lround(static_cast<float>(m_cpuImage.width) * scale));
-    const int displayHeight =
-        static_cast<int>(std::lround(static_cast<float>(m_cpuImage.height) * scale));
+    const float scale = FixedZoomScale(m_zoomMode, m_zoomScale);
+    const int displayWidth = static_cast<int>(RoundedDisplayLength(m_cpuImage.width, scale));
+    const int displayHeight = static_cast<int>(RoundedDisplayLength(m_cpuImage.height, scale));
 
     MONITORINFO monitor{};
     monitor.cbSize = sizeof(monitor);
@@ -1502,56 +1486,24 @@ void MainWindow::ToggleFullscreen()
     Invalidate(FALSE);
 }
 
-MainWindow::ViewLayout MainWindow::ComputeLayout()
+ViewLayout MainWindow::ComputeLayout() const
 {
-    ViewLayout layout;
     if (!m_cpuImage)
     {
-        return layout;
+        return {};
     }
-
     CRect rc;
     GetClientRect(&rc);
-    const float clientWidth = static_cast<float>(rc.Width());
-    const float clientHeight = static_cast<float>(rc.Height());
-    const float imageWidth = static_cast<float>(m_cpuImage.width);
-    const float imageHeight = static_cast<float>(m_cpuImage.height);
+    return ComputeViewLayout(m_cpuImage.width, m_cpuImage.height,
+                             static_cast<float>(rc.Width()),
+                             static_cast<float>(rc.Height()), m_zoomMode, m_zoomScale,
+                             m_panX, m_panY);
+}
 
-    switch (m_zoomMode)
-    {
-    case ZoomMode::Fit:
-        // Shrink to fit while keeping the aspect ratio, never upscale.
-        layout.scale = std::min(
-            {1.0f, clientWidth / imageWidth, clientHeight / imageHeight});
-        break;
-    case ZoomMode::ActualSize:
-        layout.scale = 1.0f;
-        break;
-    case ZoomMode::Custom:
-        layout.scale = m_zoomScale;
-        break;
-    }
-
-    // Rounded to whole pixels so layout, scrollbar visibility, and the
-    // window auto-fit all agree; raw float products carry rounding noise
-    // (e.g. 640.00001) that would spuriously overflow an exactly-fitting
-    // client area.
-    layout.displayWidth = std::round(imageWidth * layout.scale);
-    layout.displayHeight = std::round(imageHeight * layout.scale);
-    layout.maxPanX = std::max(0.0f, layout.displayWidth - clientWidth);
-    layout.maxPanY = std::max(0.0f, layout.displayHeight - clientHeight);
-
-    m_panX = std::clamp(m_panX, 0.0f, layout.maxPanX);
-    m_panY = std::clamp(m_panY, 0.0f, layout.maxPanY);
-
-    // Integer pixel offsets keep 100% display exactly dot-by-dot.
-    layout.destX = layout.maxPanX > 0.0f
-                       ? -std::round(m_panX)
-                       : std::round((clientWidth - layout.displayWidth) / 2.0f);
-    layout.destY = layout.maxPanY > 0.0f
-                       ? -std::round(m_panY)
-                       : std::round((clientHeight - layout.displayHeight) / 2.0f);
-    return layout;
+void MainWindow::CommitPan(const ViewLayout& layout)
+{
+    m_panX = layout.panX;
+    m_panY = layout.panY;
 }
 
 void MainWindow::UpdateScrollBars()
@@ -1573,11 +1525,9 @@ void MainWindow::UpdateScrollBars()
     // Fullscreen suppresses them entirely; drag/wheel panning still works.
     if (m_cpuImage && m_zoomMode != ZoomMode::Fit && !m_fullscreen)
     {
-        const float scale = m_zoomMode == ZoomMode::ActualSize ? 1.0f : m_zoomScale;
-        // Whole pixels, same rounding as ComputeLayout/ResizeWindowToClient,
-        // so an exactly-fitting window never shows bars from float noise.
-        displayWidth = static_cast<int>(std::lround(m_cpuImage.width * scale));
-        displayHeight = static_cast<int>(std::lround(m_cpuImage.height * scale));
+        const float scale = FixedZoomScale(m_zoomMode, m_zoomScale);
+        displayWidth = static_cast<int>(RoundedDisplayLength(m_cpuImage.width, scale));
+        displayHeight = static_cast<int>(RoundedDisplayLength(m_cpuImage.height, scale));
 
         // Decide visibility against the bar-less ("gross") client size; each
         // bar that becomes visible steals space, which can force the other
@@ -1606,6 +1556,11 @@ void MainWindow::UpdateScrollBars()
     if (needV != ((style & WS_VSCROLL) != 0))
     {
         ShowScrollBar(SB_VERT, needV);
+    }
+
+    if (m_cpuImage)
+    {
+        CommitPan(ComputeLayout());
     }
 
     CRect rc;
@@ -1651,7 +1606,7 @@ void MainWindow::SyncScrollPositions()
 
 void MainWindow::UpdateView()
 {
-    ComputeLayout();  // clamps pan
+    CommitPan(ComputeLayout());
     SyncScrollPositions();
     Invalidate(FALSE);
 }
@@ -1687,13 +1642,13 @@ void MainWindow::ApplyZoom(float newScale, CPoint anchor)
     }
 
     // Keep the image point under `anchor` stationary on screen.
-    const float imageX = (static_cast<float>(anchor.x) - layout.destX) / layout.scale;
-    const float imageY = (static_cast<float>(anchor.y) - layout.destY) / layout.scale;
+    const D2D1_POINT_2F image =
+        layout.ClientToImage(static_cast<float>(anchor.x), static_cast<float>(anchor.y));
 
     m_zoomMode = ZoomMode::Custom;
     m_zoomScale = newScale;
-    m_panX = imageX * newScale - static_cast<float>(anchor.x);
-    m_panY = imageY * newScale - static_cast<float>(anchor.y);
+    m_panX = image.x * newScale - static_cast<float>(anchor.x);
+    m_panY = image.y * newScale - static_cast<float>(anchor.y);
 
     AutoFitWindowAfterZoom();
     UpdateScrollBars();
@@ -1935,6 +1890,7 @@ BOOL MainWindow::OnMouseWheel(UINT flags, short delta, CPoint screenPoint)
 void MainWindow::OnScroll(int bar, int code)
 {
     const ViewLayout layout = ComputeLayout();
+    CommitPan(layout);
     float& pan = bar == SB_HORZ ? m_panX : m_panY;
     const float maxPan = bar == SB_HORZ ? layout.maxPanX : layout.maxPanY;
 
@@ -2453,6 +2409,7 @@ void MainWindow::Render()
     if (!m_tiles.empty())
     {
         const ViewLayout layout = ComputeLayout();
+        CommitPan(layout);
 
         // Axis-aligned tiles must rasterize identically on both sides of a
         // shared edge. Per-primitive antialiasing would blend each tile's

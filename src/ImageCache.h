@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LoadedImage.h"
+#include "StringUtil.h"
 
 #include <filesystem>
 #include <optional>
@@ -20,7 +21,7 @@ public:
     {
         for (auto it = m_entries.begin(); it != m_entries.end(); ++it)
         {
-            if (SamePath(it->path, path))
+            if (PathsEqualNoCase(it->path, path))
             {
                 LoadedImage image = std::move(it->image);
                 m_entries.erase(it);
@@ -34,7 +35,7 @@ public:
     {
         for (const auto& entry : m_entries)
         {
-            if (SamePath(entry.path, path))
+            if (PathsEqualNoCase(entry.path, path))
             {
                 return true;
             }
@@ -62,7 +63,7 @@ public:
         std::erase_if(m_entries, [&](const Entry& entry) {
             for (const auto& path : wanted)
             {
-                if (SamePath(entry.path, path))
+                if (PathsEqualNoCase(entry.path, path))
                 {
                     return false;
                 }
@@ -79,11 +80,6 @@ private:
         std::filesystem::path path;
         LoadedImage image;
     };
-
-    static bool SamePath(const std::filesystem::path& a, const std::filesystem::path& b)
-    {
-        return _wcsicmp(a.c_str(), b.c_str()) == 0;
-    }
 
     size_t TotalBytes() const
     {

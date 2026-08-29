@@ -83,9 +83,7 @@ try
 {
     const LoadedImage& image = request.image;
 
-    const WICPixelFormatGUID sourceFormat = image.format == LoadedImage::Format::Rgba16F
-                                                ? GUID_WICPixelFormat64bppPRGBAHalf
-                                                : GUID_WICPixelFormat32bppPBGRA;
+    const WICPixelFormatGUID sourceFormat = image.WicPixelFormat();
     wil::com_ptr<IWICBitmap> source;
     RETURN_IF_FAILED(factory->CreateBitmapFromMemory(
         image.width, image.height, sourceFormat, image.stride,

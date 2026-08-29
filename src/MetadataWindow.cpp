@@ -1,4 +1,5 @@
 #include "MetadataWindow.h"
+#include "StringUtil.h"
 #include "resource.h"
 
 #include <algorithm>
@@ -18,13 +19,6 @@ constexpr size_t kMaxCellChars = 300;
 
 constexpr UINT kCmdCopyValue = 1;
 constexpr UINT kCmdCopyAll = 2;
-
-std::wstring LoadStringResource(UINT id)
-{
-    WCHAR buffer[512];
-    const int length = LoadStringW(_Module.GetResourceInstance(), id, buffer, ARRAYSIZE(buffer));
-    return std::wstring(buffer, static_cast<size_t>(std::max(length, 0)));
-}
 
 // First line of a value, clipped for the list cell; the full text lives in
 // the detail pane.

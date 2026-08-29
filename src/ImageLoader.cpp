@@ -1,4 +1,5 @@
 #include "ImageLoader.h"
+#include "FileIo.h"
 #include "TurboJpeg.h"
 
 #include <shlwapi.h>  // SHCreateMemStream
@@ -9,8 +10,6 @@
 
 namespace
 {
-
-constexpr DWORD kReadChunkBytes = 1u << 20;  // 1 MiB
 
 // Budget for all pre-composited animation frames together; an animation
 // beyond it falls back to a static first frame.
@@ -371,12 +370,9 @@ try
     std::vector<uint8_t> data = std::move(request.data);
     if (data.empty())
     {
-        // Read the file ourselves in chunks instead of letting WIC do the
-        // I/O: WIC's file access has no cancellation point, while this loop
-        // can bail out between chunks when a OneDrive hydration or SMB read
-        // is slow. Known limit: a single ReadFile against a fully
-        // unresponsive share can still block until the redirector times out
-        // (CancelSynchronousIo could lift this later).
+        // Read the file ourselves instead of letting WIC do the I/O: WIC's
+        // file access has no cancellation point, while ReadFileChunked can
+        // bail out between chunks on a slow OneDrive hydration or SMB read.
         wil::unique_hfile file(CreateFileW(request.path.c_str(), GENERIC_READ,
                                            FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
                                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
@@ -388,21 +384,8 @@ try
                      static_cast<uint64_t>(fileSize.QuadPart) > UINT_MAX);
 
         data.resize(static_cast<size_t>(fileSize.QuadPart));
-        size_t offset = 0;
-        while (offset < data.size())
-        {
-            if (ShouldAbort(stopToken))
-            {
-                return HRESULT_FROM_WIN32(ERROR_CANCELLED);
-            }
-            const DWORD toRead =
-                static_cast<DWORD>(std::min<size_t>(kReadChunkBytes, data.size() - offset));
-            DWORD read = 0;
-            RETURN_IF_WIN32_BOOL_FALSE(
-                ReadFile(file.get(), data.data() + offset, toRead, &read, nullptr));
-            RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_HANDLE_EOF), read == 0);
-            offset += read;
-        }
+        RETURN_IF_FAILED(
+            ReadFileChunked(file.get(), data, [&] { return ShouldAbort(stopToken); }));
     }
 
     // JPEG goes through the optional libjpeg-turbo codec when its DLL is
@@ -447,8 +430,8 @@ try
     WICPixelFormatGUID nativeFormat{};
     (void)frame->GetPixelFormat(&nativeFormat);
     const bool wantHalf = IsHighPrecisionFormat(factory, nativeFormat);
-    const WICPixelFormatGUID targetFormat =
-        wantHalf ? GUID_WICPixelFormat64bppPRGBAHalf : GUID_WICPixelFormat32bppPBGRA;
+    out.format = wantHalf ? LoadedImage::Format::Rgba16F : LoadedImage::Format::Bgra8;
+    const WICPixelFormatGUID targetFormat = out.WicPixelFormat();
 
     wil::com_ptr<IWICFormatConverter> converter;
     RETURN_IF_FAILED(factory->CreateFormatConverter(converter.put()));
@@ -460,8 +443,6 @@ try
     UINT height = 0;
     RETURN_IF_FAILED(converter->GetSize(&width, &height));
     RETURN_HR_IF(WINCODEC_ERR_BADIMAGE, width == 0 || height == 0);
-
-    out.format = wantHalf ? LoadedImage::Format::Rgba16F : LoadedImage::Format::Bgra8;
 
     // 64-bit math: width/height come from the file and could overflow UINT.
     const uint64_t stride64 = uint64_t{width} * out.BytesPerPixel();

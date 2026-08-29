@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <wincodec.h>
 
 // The decoded image exceeds the pixel budget or the render target's
 // maximum bitmap size. Tiling raises the display limit; this remains the
@@ -32,4 +33,11 @@ struct LoadedImage
 
     uint32_t BytesPerPixel() const { return format == Format::Rgba16F ? 8 : 4; }
     explicit operator bool() const { return !pixels.empty(); }
+
+    // Pixel format used when wrapping these pixels as a WIC bitmap.
+    WICPixelFormatGUID WicPixelFormat() const
+    {
+        return format == Format::Rgba16F ? GUID_WICPixelFormat64bppPRGBAHalf
+                                         : GUID_WICPixelFormat32bppPBGRA;
+    }
 };
