@@ -1,6 +1,7 @@
 #pragma once
 
 #include "framework.h"
+#include "AnimationDecoder.h"
 #include "LoadedImage.h"
 
 #include <condition_variable>
@@ -8,13 +9,6 @@
 #include <mutex>
 #include <optional>
 #include <thread>
-
-// One frame of an animated image, pre-composited to the full canvas.
-struct AnimationFrame
-{
-    uint32_t delayMs = 100;
-    LoadedImage image;
-};
 
 // Decodes image files on a resident background thread so file I/O (which may
 // stall on OneDrive hydration or slow SMB shares) never blocks the UI thread.
