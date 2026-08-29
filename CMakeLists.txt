@@ -17,6 +17,7 @@ find_path(WTL_INCLUDE_DIR atlapp.h REQUIRED)
 add_executable(chirami WIN32
     src/main.cpp
     src/MainWindow.cpp
+    src/ImageRenderer.cpp
     src/ImageLoader.cpp
     src/ImageSaver.cpp
     src/MetadataReader.cpp

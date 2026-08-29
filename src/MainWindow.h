@@ -4,6 +4,7 @@
 #include "FolderScanner.h"
 #include "ImageCache.h"
 #include "ImageLoader.h"
+#include "ImageRenderer.h"
 #include "ImageSaver.h"
 #include "LoadedImage.h"
 #include "MetadataReader.h"
@@ -163,52 +164,16 @@ private:
 
     D2D1_COLOR_F BackgroundColorLinear() const;
 
-    HRESULT CreateDeviceResources();
-    void DiscardDeviceResources();
-    HRESULT CreateTilesFromCpuImage();
     void Render();
-    void DrawStatusText();
     void SetStatusError(HRESULT hr);
 
-    // Device-independent resources (created once in OnCreate)
+    // Device-independent resources (created once in OnCreate). The swap
+    // chain, tiles, and present path live in ImageRenderer.
     wil::com_ptr<ID2D1Factory1> m_d2dFactory;
     wil::com_ptr<IWICImagingFactory> m_wicFactory;
     wil::com_ptr<IDWriteFactory> m_dwriteFactory;
     wil::com_ptr<IDWriteTextFormat> m_textFormat;
-
-    // A piece of the displayed image on the GPU. Images beyond the GPU's
-    // maximum bitmap size are split into tiles; each tile carries a 1px
-    // gutter of neighboring pixels so linear sampling never shows seams.
-    struct ImageTile
-    {
-        D2D1_RECT_F source;      // image region this tile displays
-        D2D1_RECT_F withGutter;  // image region the bitmap actually holds
-        wil::com_ptr<ID2D1Bitmap> bitmap;
-    };
-
-    // Device-dependent resources (rebuilt after device loss). Rendering
-    // goes through an FP16 scRGB flip-model swap chain (the HDR-capable
-    // path from AGENTS.md); SDR tiles use an _SRGB format so the hardware
-    // linearizes them onto the linear-gamma target.
-    wil::com_ptr<ID3D11Device> m_d3dDevice;
-    wil::com_ptr<IDXGISwapChain1> m_swapChain;
-    wil::com_ptr<ID2D1Device> m_d2dDevice;
-    wil::com_ptr<ID2D1DeviceContext> m_d2dContext;
-    wil::com_ptr<ID2D1Bitmap1> m_targetBitmap;
-    wil::com_ptr<ID2D1Bitmap1> m_sceneBitmap;      // used when m_sdrBoost > 1
-    wil::com_ptr<ID2D1Effect> m_whiteLevelEffect;  // ColorMatrix scaling by m_sdrBoost
-    wil::com_ptr<ID2D1SolidColorBrush> m_textBrush;
-    std::vector<ImageTile> m_tiles;
-
-    // With HDR (advanced color) enabled, DWM boosts ordinary SDR windows to
-    // the user's SDR white level but composes scRGB surfaces at 1.0 == 80
-    // nits. Scaling the whole scene by this factor keeps chirami's SDR
-    // brightness in line with every other window; HDR pixels get the same
-    // headroom above it. 1.0 on SDR displays.
-    float m_sdrBoost = 1.0f;
-
-    HRESULT CreateTargetBitmap();
-    void UpdateSdrWhiteLevel();
+    std::unique_ptr<ImageRenderer> m_renderer;
 
     std::unique_ptr<ImageLoader> m_loader;
     std::unique_ptr<FolderScanner> m_scanner;
@@ -299,7 +264,6 @@ private:
     };
     SelectionPurpose m_selectionPurpose = SelectionPurpose::None;
     SelectionState m_selection;
-    wil::com_ptr<ID2D1StrokeStyle> m_dashStroke;  // device-independent
 
     // Moving the selection only starts after the pointer travels past the
     // system drag threshold, so clicks (and double-clicks) never nudge it.
@@ -310,7 +274,6 @@ private:
     void EnterSelectionMode(SelectionPurpose purpose);
     void ExitSelectionMode();
     void ApplySelection();
-    void DrawSelectionOverlay(const ViewLayout& layout);
     D2D1_POINT_2F ClientToImage(CPoint point, const ViewLayout& layout) const;
     float SelectionHitTolerance(const ViewLayout& layout) const;
 

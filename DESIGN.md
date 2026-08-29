@@ -49,6 +49,8 @@ libjpeg-turbo は導入済み（詳細はロードマップ Phase 4 ステップ
 
 **基本構成: WIC → Direct2D（HDR 対応済み）**
 
+デバイス依存の描画（D3D11 デバイス、スワップチェーン、タイル、SDR 白レベル補正、Present）は `ImageRenderer` が持つ。`MainWindow` はデバイス非依存のファクトリ（`ID2D1Factory1` / `IDWriteFactory`）とシーン記述（layout・選択・ステータス）を渡し、WM_PAINT / WM_SIZE / デバイスロスト時に指示する。
+
 - D3D11 デバイス（HW、失敗時 WARP）+ FLIP モデルの DXGI SwapChain（DXGI_FORMAT_R16G16B16A16_FLOAT）を自前で構成し、SetColorSpace1 で scRGB（DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709、リニア、1.0 = SDR 白）を指定。SDR ディスプレイでも HDR ディスプレイでも DWM が正しく合成する
 - Direct2D は ID2D1DeviceContext 経由で SwapChain のバックバッファに描画。SetDpi(96,96) で 1 DIP = 1 物理ピクセルを維持
 - SDR 画像のタイルは DXGI_FORMAT_B8G8R8A8_UNORM_SRGB でアップロードし、サンプリング時のハードウェア sRGB デコードでリニアターゲットに正しく乗せる（移行前とピクセル一致することを検証済み）
@@ -63,9 +65,9 @@ Direct3D 12 はこの用途ではオーバーキル。使わない。
 
 **WTL と Direct2D の統合に関する注意:**
 
-- WM_PAINT では BeginPaint/EndPaint ではなく BeginDraw/EndDraw を使う
-- WM_SIZE でレンダーターゲットのリサイズ処理が必要
-- WTL の CWindowImpl を継承したウィンドウクラスに Direct2D 描画を統合する
+- WM_PAINT では BeginPaint/EndPaint ではなく `ImageRenderer::Present` を使う（更新領域は ValidateRect で消す）
+- WM_SIZE で `ImageRenderer::Resize`（ResizeBuffers）。タイルは D2D デバイス上に残るため再アップロード不要
+- WTL の CWindowImpl は入力とウィンドウ寿命を担当し、描画本体は `ImageRenderer` に委譲する
 
 **ビュー計算:** 倍率・パン・配置は `ComputeViewLayout`（`ViewLayout.h`）の純粋関数で求める。パンのクランプは戻り値（`panX` / `panY` と、そこから決まる `dest`）に含め、ウィンドウ側は `CommitPan` でメンバーへ書き戻す。描画・ヒットテスト・スクロールは同じ layout を共有する。表示サイズのピクセル丸めも同ヘッダにあり、スクロールバーの要否判定とズーム後のウィンドウ自動リサイズが layout と一致する。
 
