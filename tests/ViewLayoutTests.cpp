@@ -80,6 +80,31 @@ TEST_CASE("ClientToImage inverts the layout transform", "[viewlayout]")
     REQUIRE_THAT(image.y, Catch::Matchers::WithinAbs(50.0, 1e-4));
 }
 
+TEST_CASE("Fit fills the viewport only when upscaling is allowed", "[viewlayout]")
+{
+    // Windowed: a small image stays dot-by-dot in the middle of the window.
+    REQUIRE(FitScale(100, 50, 800.0f, 600.0f, false) == 1.0f);
+    // Fullscreen: the same image is scaled up until an axis runs out.
+    REQUIRE(FitScale(100, 50, 800.0f, 600.0f, true) == 8.0f);   // width-limited
+    REQUIRE(FitScale(100, 50, 2000.0f, 600.0f, true) == 12.0f);  // height-limited
+    // Shrinking is the same either way, and an empty image has no scale.
+    REQUIRE(FitScale(2000, 1000, 800.0f, 600.0f, false) == FitScale(2000, 1000, 800.0f, 600.0f, true));
+    REQUIRE(FitScale(0, 0, 800.0f, 600.0f, true) == 0.0f);
+}
+
+TEST_CASE("An upscaled fit centers the image and needs no panning", "[viewlayout]")
+{
+    const ViewLayout layout = ComputeViewLayout(100, 50, 800.0f, 600.0f, ZoomMode::Fit, 1.0f,
+                                                0.0f, 0.0f, /*fitMayUpscale=*/true);
+    REQUIRE(layout.scale == 8.0f);
+    REQUIRE(layout.displayWidth == 800.0f);
+    REQUIRE(layout.displayHeight == 400.0f);
+    REQUIRE(layout.destX == 0.0f);
+    REQUIRE(layout.destY == 100.0f);
+    REQUIRE(layout.maxPanX == 0.0f);
+    REQUIRE(layout.maxPanY == 0.0f);
+}
+
 TEST_CASE("FixedZoomScale ignores the zoom factor at actual size", "[viewlayout]")
 {
     REQUIRE(FixedZoomScale(ZoomMode::ActualSize, 3.0f) == 1.0f);

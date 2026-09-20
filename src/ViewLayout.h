@@ -33,6 +33,21 @@ struct ViewLayout
     }
 };
 
+// Scale that shows the whole image in the viewport. Windowed display never
+// upscales (a small image stays dot-by-dot); fullscreen does, which is what
+// makes a small image fill the screen instead of floating in the middle.
+inline float FitScale(uint32_t imageWidth, uint32_t imageHeight, float clientWidth,
+                      float clientHeight, bool allowUpscale)
+{
+    if (imageWidth == 0 || imageHeight == 0)
+    {
+        return 0.0f;
+    }
+    const float fit = std::min(clientWidth / static_cast<float>(imageWidth),
+                               clientHeight / static_cast<float>(imageHeight));
+    return allowUpscale ? fit : std::min(1.0f, fit);
+}
+
 // Scale for ActualSize (1) and Custom (`zoomScale`). Fit depends on the
 // viewport and is computed inside ComputeViewLayout.
 inline float FixedZoomScale(ZoomMode mode, float zoomScale)
@@ -50,7 +65,8 @@ inline float RoundedDisplayLength(uint32_t imagePixels, float scale)
 
 inline ViewLayout ComputeViewLayout(uint32_t imageWidth, uint32_t imageHeight,
                                     float clientWidth, float clientHeight, ZoomMode zoomMode,
-                                    float zoomScale, float panX, float panY)
+                                    float zoomScale, float panX, float panY,
+                                    bool fitMayUpscale = false)
 {
     ViewLayout layout;
     if (imageWidth == 0 || imageHeight == 0)
@@ -58,14 +74,11 @@ inline ViewLayout ComputeViewLayout(uint32_t imageWidth, uint32_t imageHeight,
         return layout;
     }
 
-    const float imageW = static_cast<float>(imageWidth);
-    const float imageH = static_cast<float>(imageHeight);
-
     switch (zoomMode)
     {
     case ZoomMode::Fit:
-        // Shrink to fit while keeping the aspect ratio, never upscale.
-        layout.scale = std::min({1.0f, clientWidth / imageW, clientHeight / imageH});
+        layout.scale =
+            FitScale(imageWidth, imageHeight, clientWidth, clientHeight, fitMayUpscale);
         break;
     case ZoomMode::ActualSize:
         layout.scale = 1.0f;

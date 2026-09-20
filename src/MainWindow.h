@@ -204,6 +204,9 @@ private:
     // viewport within the scaled image, in pixels (1 DIP == 1 pixel).
     ZoomMode m_zoomMode = ZoomMode::Fit;
     float m_zoomScale = 1.0f;  // meaningful in Custom mode only
+    // What the zoom was before fullscreen took over, restored on the way out.
+    ZoomMode m_windowedZoomMode = ZoomMode::Fit;
+    float m_windowedZoomScale = 1.0f;
     float m_panX = 0.0f;
     float m_panY = 0.0f;
     bool m_dragging = false;

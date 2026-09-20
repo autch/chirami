@@ -1305,6 +1305,10 @@ void MainWindow::ApplyAutoZoomForNewImage()
     if (m_fullscreen)
     {
         m_zoomMode = ZoomMode::Fit;
+        // The saved zoom belongs to the previous image; fit is the safe
+        // windowed view for this one in a window sized for the other.
+        m_windowedZoomMode = ZoomMode::Fit;
+        m_windowedZoomScale = 1.0f;
         return;  // never touch the window while fullscreen
     }
 
@@ -1471,7 +1475,12 @@ void MainWindow::ToggleFullscreen()
     {
         m_restorePlacement.length = sizeof(m_restorePlacement);
         GetWindowPlacement(&m_restorePlacement);
+        m_windowedZoomMode = m_zoomMode;
+        m_windowedZoomScale = m_zoomScale;
         m_fullscreen = true;
+        // Fullscreen shows the whole image, scaled up if it is smaller than
+        // the screen; the windowed zoom comes back on the way out.
+        m_zoomMode = ZoomMode::Fit;
 
         MONITORINFO monitor{};
         monitor.cbSize = sizeof(monitor);
@@ -1483,6 +1492,8 @@ void MainWindow::ToggleFullscreen()
     else
     {
         m_fullscreen = false;
+        m_zoomMode = m_windowedZoomMode;
+        m_zoomScale = m_windowedZoomScale;
         SetMenu(m_menu);
         ModifyStyle(0, WS_OVERLAPPEDWINDOW);
         SetWindowPlacement(&m_restorePlacement);  // restores maximized state too
@@ -1504,7 +1515,7 @@ ViewLayout MainWindow::ComputeLayout() const
     return ComputeViewLayout(m_cpuImage.width, m_cpuImage.height,
                              static_cast<float>(rc.Width()),
                              static_cast<float>(rc.Height()), m_zoomMode, m_zoomScale,
-                             m_panX, m_panY);
+                             m_panX, m_panY, m_fullscreen);
 }
 
 void MainWindow::CommitPan(const ViewLayout& layout)
@@ -1669,7 +1680,28 @@ void MainWindow::StepZoom(int direction, CPoint anchor)
     {
         return;
     }
-    ApplyZoom(direction > 0 ? layout.scale * kZoomStep : layout.scale / kZoomStep, anchor);
+    const float target = direction > 0 ? layout.scale * kZoomStep : layout.scale / kZoomStep;
+
+    // Fit is one of the steps: a step that would cross it lands on it, so
+    // fit-to-window is always reachable with the zoom keys. In a window that
+    // follows the image, fit equals the current scale and nothing is crossed.
+    if (m_zoomMode != ZoomMode::Fit)
+    {
+        CRect rc;
+        GetClientRect(&rc);
+        const float fit = FitScale(m_cpuImage.width, m_cpuImage.height,
+                                   static_cast<float>(rc.Width()),
+                                   static_cast<float>(rc.Height()), m_fullscreen);
+        const bool alreadyFit = std::abs(layout.scale - fit) <= fit * 0.001f;
+        if (fit > 0.0f && !alreadyFit
+            && ((direction < 0 && layout.scale > fit && target <= fit)
+                || (direction > 0 && layout.scale < fit && target >= fit)))
+        {
+            SetZoomMode(ZoomMode::Fit);
+            return;
+        }
+    }
+    ApplyZoom(target, anchor);
 }
 
 void MainWindow::SetZoomMode(ZoomMode mode)
@@ -1730,7 +1762,7 @@ void MainWindow::OnLButtonDown(UINT /*flags*/, CPoint point)
     }
 }
 
-void MainWindow::OnLButtonDblClk(UINT flags, CPoint point)
+void MainWindow::OnLButtonDblClk(UINT /*flags*/, CPoint point)
 {
     if (InSelectionMode() && m_cpuImage && m_selection.HasRect())
     {
@@ -1748,9 +1780,15 @@ void MainWindow::OnLButtonDblClk(UINT flags, CPoint point)
             return;
         }
     }
-    // The second press of a fast double-click elsewhere behaves like a
-    // normal button-down.
-    OnLButtonDown(flags, point);
+    // Anywhere else it toggles fullscreen. The first click of the pair may
+    // have started a pan; drop it so the view does not drift.
+    m_dragging = false;
+    m_movePending = false;
+    if (GetCapture() == m_hWnd)
+    {
+        ReleaseCapture();
+    }
+    ToggleFullscreen();
 }
 
 void MainWindow::OnMouseMove(UINT /*flags*/, CPoint point)
