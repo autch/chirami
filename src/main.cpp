@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "MainWindow.h"
 #include "Settings.h"
+#include "StringUtil.h"
 #include "resource.h"
 
 #include <commctrl.h>  // InitCommonControlsEx (properties window ListView)
@@ -46,12 +47,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR /*cmdLine*/, int cmdS
     _Module.AddMessageLoop(&msgLoop);
     auto removeLoop = wil::scope_exit([] { _Module.RemoveMessageLoop(); });
 
-    WCHAR title[64];
-    LoadStringW(hInstance, IDS_APP_TITLE, title, ARRAYSIZE(title));
+    const std::wstring title = AppTitle();
 
     MainWindow wnd;
     wnd.InitSettings(std::move(settings));
-    if (wnd.Create(nullptr, CWindow::rcDefault, title, WS_OVERLAPPEDWINDOW) == nullptr)
+    if (wnd.Create(nullptr, CWindow::rcDefault, title.c_str(), WS_OVERLAPPEDWINDOW) == nullptr)
     {
         return 1;
     }

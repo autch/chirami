@@ -51,6 +51,7 @@
 #define IDS_META_COPY_ALL       146
 #define IDS_META_ERROR          147
 #define IDS_META_DISPLAYFORMAT  148
+#define IDS_DEBUG_MARK          149
 
 #define IDR_MAINMENU            200
 

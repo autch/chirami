@@ -201,7 +201,7 @@ void MainWindow::DisplayImage(const std::wstring& displayName, LoadedImage image
     m_panY = 0.0f;
     ApplyAutoZoomForNewImage();
     UpdateScrollBars();
-    SetWindowTextW((displayName + L" - " + LoadStringResource(IDS_APP_TITLE)).c_str());
+    SetWindowTextW((displayName + L" - " + AppTitle()).c_str());
     Invalidate(FALSE);
 
     RequestMetadataForCurrent();
@@ -912,7 +912,7 @@ void MainWindow::ShowResizeDialog()
 
 void MainWindow::ShowAboutBox()
 {
-    const std::wstring version = CHIRAMI_VERSION;
+    const std::wstring version = std::wstring(CHIRAMI_VERSION) + DebugMark();
     std::wstring text =
         std::vformat(LoadStringResource(IDS_ABOUT_TEXT), std::make_wformat_args(version));
 

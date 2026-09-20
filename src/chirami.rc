@@ -58,6 +58,7 @@ BEGIN
     IDS_META_COPY_ALL        L"すべてコピー(&A)"
     IDS_META_ERROR           L"メタデータを取得できません"
     IDS_META_DISPLAYFORMAT   L"表示形式"
+    IDS_DEBUG_MARK           L" [DEBUG]"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -191,6 +192,7 @@ BEGIN
     IDS_META_COPY_ALL        L"Copy &All"
     IDS_META_ERROR           L"Cannot read metadata"
     IDS_META_DISPLAYFORMAT   L"Display format"
+    IDS_DEBUG_MARK           L" [DEBUG]"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
