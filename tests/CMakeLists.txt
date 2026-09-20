@@ -4,9 +4,13 @@
 find_package(Catch2 3 CONFIG REQUIRED)
 
 add_executable(chirami_tests
+    ImageFormatIdTests.cpp
     PathCompareTests.cpp
+    ProgIdTests.cpp
     ViewLayoutTests.cpp
+    "${CMAKE_SOURCE_DIR}/src/ImageFormatId.cpp"
     "${CMAKE_SOURCE_DIR}/src/PathCompare.cpp"
+    "${CMAKE_SOURCE_DIR}/src/ProgIds.cpp"
 )
 
 target_include_directories(chirami_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
@@ -28,7 +32,8 @@ target_compile_options(chirami_tests PRIVATE
     /Zc:__cplusplus
 )
 
-target_link_libraries(chirami_tests PRIVATE Catch2::Catch2WithMain)
+# uuid.lib carries the WIC container format GUIDs the format table names.
+target_link_libraries(chirami_tests PRIVATE Catch2::Catch2WithMain uuid)
 
 include(Catch)
 catch_discover_tests(chirami_tests)

@@ -1,5 +1,5 @@
 #include "WicDecoders.h"
-#include "PathCompare.h"
+#include "ImageFormatId.h"
 
 std::unordered_set<std::wstring> QueryWicDecoderExtensions(IWICImagingFactory* factory)
 {
@@ -34,21 +34,9 @@ std::unordered_set<std::wstring> QueryWicDecoderExtensions(IWICImagingFactory* f
         }
         list.resize(wcslen(list.c_str()));
 
-        // Comma-separated, e.g. ".jpeg,.jpg,.jfif"
-        size_t start = 0;
-        while (start < list.size())
+        for (std::wstring& extension : SplitExtensionList(list))
         {
-            const size_t comma = list.find(L',', start);
-            const size_t end = (comma == std::wstring::npos) ? list.size() : comma;
-            if (end > start)
-            {
-                extensions.insert(ToLowerInvariant(list.substr(start, end - start)));
-            }
-            if (comma == std::wstring::npos)
-            {
-                break;
-            }
-            start = comma + 1;
+            extensions.insert(std::move(extension));
         }
     }
     return extensions;

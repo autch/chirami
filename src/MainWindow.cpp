@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "AppPaths.h"
 #include "FileAssociation.h"
+#include "ImageFormatId.h"
 #include "ImageTransform.h"
 #include "PathCompare.h"
 #include "ResizeDialog.h"
@@ -37,48 +38,6 @@ UINT ErrorStringId(HRESULT hr)
         return IDS_ERR_DECODE;
     }
     return IDS_ERR_FILE_OPEN;
-}
-
-GUID ContainerFormatFromExtension(std::wstring_view extension)
-{
-    if (EqualsNoCase(extension, L".png"))
-    {
-        return GUID_ContainerFormatPng;
-    }
-    if (EqualsNoCase(extension, L".jpg") || EqualsNoCase(extension, L".jpeg")
-        || EqualsNoCase(extension, L".jfif"))
-    {
-        return GUID_ContainerFormatJpeg;
-    }
-    if (EqualsNoCase(extension, L".bmp"))
-    {
-        return GUID_ContainerFormatBmp;
-    }
-    if (EqualsNoCase(extension, L".tif") || EqualsNoCase(extension, L".tiff"))
-    {
-        return GUID_ContainerFormatTiff;
-    }
-    return GUID_NULL;
-}
-
-// The save dialog's file types, in the order SetFileTypes receives them.
-const GUID kSaveFilterFormats[] = {
-    GUID_ContainerFormatPng,
-    GUID_ContainerFormatJpeg,
-    GUID_ContainerFormatBmp,
-    GUID_ContainerFormatTiff,
-};
-
-UINT SaveFilterIndexFor(const GUID& container)
-{
-    for (UINT i = 0; i < ARRAYSIZE(kSaveFilterFormats); ++i)
-    {
-        if (kSaveFilterFormats[i] == container)
-        {
-            return i + 1;  // the dialog counts file types from 1
-        }
-    }
-    return 1;  // PNG
 }
 
 }  // namespace
@@ -782,17 +741,20 @@ try
     }
     auto dialog = wil::CoCreateInstance<IFileSaveDialog>(CLSID_FileSaveDialog);
 
-    const std::wstring pngName = LoadStringResource(IDS_FILTER_PNG);
-    const std::wstring jpegName = LoadStringResource(IDS_FILTER_JPEG);
-    const std::wstring bmpName = LoadStringResource(IDS_FILTER_BMP);
-    const std::wstring tiffName = LoadStringResource(IDS_FILTER_TIFF);
-    const COMDLG_FILTERSPEC filters[] = {
-        {pngName.c_str(), L"*.png"},
-        {jpegName.c_str(), L"*.jpg;*.jpeg"},
-        {bmpName.c_str(), L"*.bmp"},
-        {tiffName.c_str(), L"*.tif;*.tiff"},
-    };
-    THROW_IF_FAILED(dialog->SetFileTypes(ARRAYSIZE(filters), filters));
+    // Names are resources, so they have to outlive the COMDLG_FILTERSPEC
+    // array that points at them.
+    std::vector<std::wstring> filterNames;
+    std::vector<COMDLG_FILTERSPEC> filters;
+    for (const SaveFormat& format : SaveFormats())
+    {
+        filterNames.push_back(LoadStringResource(format.filterNameId));
+    }
+    for (size_t i = 0; i < filterNames.size(); ++i)
+    {
+        filters.push_back({filterNames[i].c_str(), SaveFormats()[i].filterSpec});
+    }
+    THROW_IF_FAILED(
+        dialog->SetFileTypes(static_cast<UINT>(filters.size()), filters.data()));
 
     // Point the dialog at the open file - folder, name and format alike - so
     // confirming it overwrites that file. The dialog asks before clobbering.
@@ -847,8 +809,7 @@ try
     {
         UINT typeIndex = 1;  // 1-based
         (void)dialog->GetFileTypeIndex(&typeIndex);
-        container =
-            kSaveFilterFormats[std::clamp<UINT>(typeIndex, 1, ARRAYSIZE(kSaveFilterFormats)) - 1];
+        container = ContainerFormatForFilterIndex(typeIndex);
     }
 
     if (!m_saver->RequestSave(std::move(path), container, m_cpuImage))

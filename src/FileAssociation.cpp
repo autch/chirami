@@ -1,6 +1,6 @@
 #include "FileAssociation.h"
 #include "AppPaths.h"
-#include "PathCompare.h"
+#include "ProgIds.h"
 #include "WicDecoders.h"
 
 #include <shellapi.h>  // ShellExecuteW
@@ -24,7 +24,6 @@ constexpr PCWSTR kAppRootKey = L"Software\\chirami";
 constexpr PCWSTR kCapabilitiesKey = L"Software\\chirami\\Capabilities";
 constexpr PCWSTR kRegisteredAppsKey = L"Software\\RegisteredApplications";
 constexpr PCWSTR kClassesKey = L"Software\\Classes";
-constexpr PCWSTR kProgIdPrefix = L"chirami.AssocFile.";
 constexpr PCWSTR kFileExtsKey =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts";
 constexpr PCWSTR kRegisteredExeValue = L"RegisteredExePath";
@@ -55,18 +54,6 @@ catch (...)
 {
     LOG_CAUGHT_EXCEPTION();
     return std::nullopt;  // an unreadable value counts as "not set"
-}
-
-// ".jpg" -> "JPG". The ProgID built from this is stored in the registry of
-// every user who registered, so the mapping must not drift.
-std::wstring ExtensionUpper(const std::wstring& extension)
-{
-    return ToUpperInvariant(std::wstring_view(extension).substr(1));
-}
-
-std::wstring ProgIdFor(const std::wstring& extension)
-{
-    return kProgIdPrefix + ExtensionUpper(extension);
 }
 
 // Sorted so the registry layout and the generated .reg file are stable.
@@ -109,7 +96,7 @@ void WriteUnregisterRegFiles(const std::vector<std::wstring>& extensions)
     content += L"; Removes the file associations registered by chirami (HKCU only).\r\n\r\n";
     for (const std::wstring& extension : extensions)
     {
-        content += L"[-HKEY_CURRENT_USER\\Software\\Classes\\" + ProgIdFor(extension) + L"]\r\n";
+        content += L"[-HKEY_CURRENT_USER\\Software\\Classes\\" + ProgIdForExtension(extension) + L"]\r\n";
     }
     content += L"\r\n[-HKEY_CURRENT_USER\\Software\\chirami]\r\n";
     content += L"\r\n[HKEY_CURRENT_USER\\Software\\RegisteredApplications]\r\n";
@@ -161,11 +148,6 @@ std::vector<std::wstring> SubKeyNames(PCWSTR parent)
     return names;
 }
 
-bool StartsWithProgIdPrefix(const std::wstring& text)
-{
-    return _wcsnicmp(text.c_str(), kProgIdPrefix, wcslen(kProgIdPrefix)) == 0;
-}
-
 }  // namespace
 
 Status Query()
@@ -190,8 +172,8 @@ try
 
     for (const std::wstring& extension : extensions)
     {
-        const std::wstring upper = ExtensionUpper(extension);
-        const std::wstring base = std::wstring(kClassesKey) + L"\\" + ProgIdFor(extension);
+        const std::wstring upper = ExtensionLabel(extension);
+        const std::wstring base = std::wstring(kClassesKey) + L"\\" + ProgIdForExtension(extension);
         const std::wstring typeName =
             std::vformat(typeNameFormat, std::make_wformat_args(upper));
 
@@ -210,7 +192,7 @@ try
     for (const std::wstring& extension : extensions)
     {
         RETURN_IF_FAILED(SetString(std::wstring(kCapabilitiesKey) + L"\\FileAssociations",
-                                   extension.c_str(), ProgIdFor(extension)));
+                                   extension.c_str(), ProgIdForExtension(extension)));
     }
     RETURN_IF_FAILED(SetString(kRegisteredAppsKey, kAppName, kCapabilitiesKey));
 
@@ -234,7 +216,7 @@ try
 
     for (const std::wstring& name : SubKeyNames(kClassesKey))
     {
-        if (StartsWithProgIdPrefix(name))
+        if (IsChiramiProgId(name))
         {
             keep(RegDeleteTreeW(HKEY_CURRENT_USER,
                                 (std::wstring(kClassesKey) + L"\\" + name).c_str()));
@@ -251,7 +233,7 @@ try
         const std::wstring userChoice =
             std::wstring(kFileExtsKey) + L"\\" + extension + L"\\UserChoice";
         const auto progId = GetString(userChoice.c_str(), L"ProgId");
-        if (progId && StartsWithProgIdPrefix(*progId))
+        if (progId && IsChiramiProgId(*progId))
         {
             keep(RegDeleteTreeW(HKEY_CURRENT_USER, userChoice.c_str()));
         }

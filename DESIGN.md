@@ -113,7 +113,7 @@ Direct3D 12 はこの用途ではオーバーキル。使わない。
 - それでも、バッファが足りないと黙って切り詰める `GetModuleFileNameW` をそのまま呼ぶ書き方は残さない。長さに応じて再試行する `wil::GetModuleFileNameW<std::wstring>()` を使う
 - レジストリの文字列値は `wil::reg::try_get_value_string` を使う（固定長バッファでは長い値の読み出しが丸ごと失敗する）
 
-**置き場所。** 比較と正規化は `src/PathCompare.h`、拡張子と保存フォーマットの対応は `src/ImageFormatId.h`、exe のパスは `src/AppPaths.h` に置く。いずれも `framework.h`（WTL と `extern CAppModule _Module`）に依存させない。テスト実行ファイルからリンクできる状態を保つための制約である（「テスト方針」参照）。
+**置き場所。** 比較と正規化は `src/PathCompare.h`、拡張子と保存フォーマットの対応は `src/ImageFormatId.h`、関連付けの ProgID 名は `src/ProgIds.h`、exe のパスは `src/AppPaths.h` に置く。いずれも `framework.h`（WTL と `extern CAppModule _Module`）に依存させない。テスト実行ファイルからリンクできる状態を保つための制約である（「テスト方針」参照）。
 
 ## UI 仕様
 
@@ -358,3 +358,9 @@ END
 22. ファイルの関連付け登録（完了。HKCU のみ・オプトイン。ファイルメニューの「関連付け」サブメニューから登録・更新/解除/既定のアプリ設定を開く、を提供。詳細は「ファイルの関連付け」セクション参照）
 23. 画像のプロパティウィンドウ（完了。詳細は「UI 仕様 > 画像のプロパティウィンドウ」参照）
 24. 背景色の設定（完了。表示メニューから ChooseColor で選択し INI に保存。詳細は「UI 仕様 > ウィンドウ」参照）
+25. パス・ファイル名操作の共通化とユニットテスト基盤（完了）
+    - ファイル名・拡張子の比較を CRT（`_wcsicmp` / `towlower`）から Win32 の序数比較（`CompareStringOrdinal`）と不変ロケールの `LCMapStringEx` に統一。根拠と適用範囲はアーキテクチャ方針 >「文字列比較とパスの同一性」参照。全角英字を含む名前で NTFS と判定が食い違う問題が解消した
+    - 純粋ロジックを WTL 非依存のモジュール（`PathCompare` / `ImageFormatId` / `ProgIds` / `AppPaths`）に切り出し、Catch2 でユニットテストを追加。テストは vcpkg の manifest feature `tests` の下にあり、配布ビルドの内容もビルド時間も変わらない。方針は「テスト方針」参照
+    - exe パスの取得を `AppPaths` に集約し、固定長バッファ（`MAX_PATH` 前提）を撤去。レジストリ文字列の読み出しも長さ非依存に
+    - 拡張子 ⇄ 保存フォーマット ⇄ 保存ダイアログのフィルター番号を `ImageFormatId` の 1 つの表に統合。関連付けの ProgID 生成規則はテストで文字列単位に固定し、既存ユーザーの登録が孤児にならないようにした
+    - 「名前を付けて保存」の既定値を開いている画像そのものに変更（「UI 仕様 > ファイル操作」参照）

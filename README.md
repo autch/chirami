@@ -51,7 +51,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 | 左ドラッグ / left drag | パン（表示がウィンドウより大きいとき） / pan (when the image overflows the window) |
 | Enter または F11 / Enter or F11 | フルスクリーン切り替え / toggle fullscreen |
 | Ctrl + O | ファイルを開く / open a file |
-| Ctrl + S | 名前を付けて保存（形式変換） / save as (format conversion) |
+| Ctrl + S | 名前を付けて保存（既定は開いている画像の上書き、形式変換も可） / save as (defaults to the open file, can convert the format) |
 | Ctrl + V | クリップボードから貼り付け / paste from the clipboard |
 | R / L | 右へ / 左へ 90 度回転 / rotate right / left 90° |
 | H / V | 左右反転 / 上下反転 / flip horizontal / vertical |
@@ -83,7 +83,15 @@ CRT は静的リンクのため、VC++ 再頒布可能パッケージのイン�
 
 任意の `turbojpeg.dll` は vcpkg のマニフェストインストールでビルドされ、自動的に exe の隣にコピーされます（不要なら削除するだけで無効化できます）。 / The optional `turbojpeg.dll` is built by the vcpkg manifest install and copied next to the exe automatically (delete it to disable).
 
-main への push ごとに GitHub Actions が release ビルドを行い、`chirami-win64` アーティファクト（chirami.exe、turbojpeg.dll、ライセンス一式）を生成します。 / Every push to main is built by GitHub Actions, producing the `chirami-win64` artifact (chirami.exe, turbojpeg.dll, and the license files).
+ユニットテストは vcpkg の manifest feature `tests`（Catch2）の下にあり、リリースビルドには含まれません。 / The unit tests sit behind the vcpkg manifest feature `tests` (Catch2) and are not part of a release build.
+
+```
+cmake --preset debug-tests
+cmake --build --preset debug-tests
+ctest --preset debug-tests
+```
+
+main への push ごとに GitHub Actions が release ビルドとユニットテストを実行し、`chirami-win64` アーティファクト（chirami.exe、turbojpeg.dll、ライセンス一式）を生成します。 / Every push to main is built and tested by GitHub Actions, producing the `chirami-win64` artifact (chirami.exe, turbojpeg.dll, and the license files).
 
 ## サードパーティソフトウェア / Third-party software
 
