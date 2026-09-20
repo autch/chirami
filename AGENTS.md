@@ -58,6 +58,8 @@ the ZIP to the release assets.
 - Error handling: WIL THROW_IF_FAILED / RETURN_IF_FAILED patterns
 - COM lifetime: wil::com_ptr
 - Thread synchronization: standard library (std::thread, std::mutex, etc.)
+- DESIGN.md is Japanese, but comments citing one of its sections name that section in
+  English, e.g. `see DESIGN.md, "File association"`, so the source stays English throughout
 
 ## Workflow
 

@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AppPaths.h"
 #include "FileAssociation.h"
 #include "ImageTransform.h"
 #include "ResizeDialog.h"
@@ -1081,7 +1082,7 @@ LRESULT MainWindow::OnAssocCheck(UINT, WPARAM, LPARAM, BOOL&)
 #ifndef _DEBUG
     const FileAssociation::Status status = FileAssociation::Query();
     if (!status.registered || status.exePath.empty()
-        || PathsEqualNoCase(status.exePath, FileAssociation::CurrentExePath()))
+        || PathsEqualNoCase(status.exePath, AppPaths::ExePath()))
     {
         return 0;
     }

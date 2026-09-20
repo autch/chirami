@@ -1,4 +1,5 @@
 #include "TurboJpeg.h"
+#include "AppPaths.h"
 
 #include <turbojpeg.h>
 
@@ -41,13 +42,12 @@ const Api& GetApi()
     std::call_once(once, [] {
         // Only the DLL sitting next to the exe is trusted; never search the
         // path. Deleting the DLL cleanly disables the codec (WIC fallback).
-        WCHAR buffer[MAX_PATH];
-        if (GetModuleFileNameW(nullptr, buffer, ARRAYSIZE(buffer)) == 0)
+        const std::filesystem::path exeDir = AppPaths::ExeDirectory();
+        if (exeDir.empty())
         {
             return;
         }
-        const std::filesystem::path dllPath =
-            std::filesystem::path(buffer).parent_path() / L"turbojpeg.dll";
+        const std::filesystem::path dllPath = exeDir / L"turbojpeg.dll";
         wil::unique_hmodule module(LoadLibraryExW(dllPath.c_str(), nullptr, 0));
         if (!module)
         {

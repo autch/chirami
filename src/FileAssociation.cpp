@@ -1,9 +1,12 @@
 #include "FileAssociation.h"
+#include "AppPaths.h"
 #include "StringUtil.h"
 #include "WicDecoders.h"
 
 #include <shellapi.h>  // ShellExecuteW
 #include <shlobj.h>    // SHGetKnownFolderPath, SHChangeNotify
+
+#include <wil/registry.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -42,15 +45,16 @@ HRESULT SetString(const std::wstring& subkey, PCWSTR name, const std::wstring& d
 }
 
 std::optional<std::wstring> GetString(PCWSTR subkey, PCWSTR name)
+try
 {
-    WCHAR buffer[1024];
-    DWORD size = sizeof(buffer);
-    if (RegGetValueW(HKEY_CURRENT_USER, subkey, name, RRF_RT_REG_SZ, nullptr, buffer, &size)
-        != ERROR_SUCCESS)
-    {
-        return std::nullopt;
-    }
-    return std::wstring(buffer);
+    // Length-independent: a fixed buffer used to fail outright on a value
+    // longer than it, which an exe path can be.
+    return wil::reg::try_get_value_string(HKEY_CURRENT_USER, subkey, name);
+}
+catch (...)
+{
+    LOG_CAUGHT_EXCEPTION();
+    return std::nullopt;  // an unreadable value counts as "not set"
 }
 
 // ".jpg" -> "JPG"
@@ -117,9 +121,10 @@ void WriteUnregisterRegFiles(const std::vector<std::wstring>& extensions)
 
     // Best effort on both copies: losing the fallback file must not fail the
     // registration that already happened.
-    const std::filesystem::path exeDir =
-        std::filesystem::path(CurrentExePath()).parent_path();
-    LOG_IF_FAILED(WriteFileUtf16(exeDir / kUnregisterFileName, content));
+    if (const std::filesystem::path exeDir = AppPaths::ExeDirectory(); !exeDir.empty())
+    {
+        LOG_IF_FAILED(WriteFileUtf16(exeDir / kUnregisterFileName, content));
+    }
 
     wil::unique_cotaskmem_string appData;
     if (SUCCEEDED(
@@ -170,18 +175,12 @@ Status Query()
     return status;
 }
 
-std::wstring CurrentExePath()
-{
-    WCHAR buffer[MAX_PATH * 4];
-    const DWORD length = GetModuleFileNameW(nullptr, buffer, ARRAYSIZE(buffer));
-    return std::wstring(buffer, length);
-}
-
 HRESULT Register(IWICImagingFactory* factory, const std::wstring& appDescription,
                  const std::wstring& typeNameFormat) noexcept
 try
 {
-    const std::wstring exe = CurrentExePath();
+    const std::wstring exe = AppPaths::ExePath().wstring();
+    RETURN_HR_IF(E_UNEXPECTED, exe.empty());  // never register a guessed path
     const std::vector<std::wstring> extensions = SortedExtensions(factory);
     RETURN_HR_IF(E_UNEXPECTED, extensions.empty());
 

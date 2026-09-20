@@ -4,8 +4,8 @@
 
 #include <string>
 
-// Opt-in, per-user (HKCU only) file association, per DESIGN.md
-// 「ファイルの関連付け」. Registers chirami as an association *candidate*
+// Opt-in, per-user (HKCU only) file association, per DESIGN.md,
+// "File association". Registers chirami as an association *candidate*
 // for every extension an installed WIC decoder can open; promoting it to
 // the default remains a user action in Windows Settings (UserChoice is
 // hash-protected by design, and we do not work around that).
@@ -20,9 +20,6 @@ struct Status
 
 // Reads the registration state from HKCU. Registry only; fast.
 Status Query();
-
-// Full path of the running chirami.exe.
-std::wstring CurrentExePath();
 
 // Writes ProgIDs (with the OS photo thumbnail provider), Capabilities and
 // the RegisteredApplications entry under HKCU, and generates
