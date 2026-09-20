@@ -6,5 +6,13 @@
     "wtl",
     "wil",
     "libjpeg-turbo"
-  ]
+  ],
+  "features": {
+    "tests": {
+      "description": "Unit tests for the pure logic (Catch2). Not part of a release build.",
+      "dependencies": [
+        "catch2"
+      ]
+    }
+  }
 }

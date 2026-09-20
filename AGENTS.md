@@ -27,12 +27,29 @@ conventions, and workflow.
   x64-windows-static, except libjpeg-turbo which builds as a DLL (still static CRT) and is
   copied next to the exe by a post-build step
 
+## Tests
+
+Unit tests are Catch2, kept behind the vcpkg manifest feature `tests` so a release
+build never resolves them. What is in scope and why: DESIGN.md, "Test policy".
+
+```
+cmake --preset debug-tests
+cmake --build --preset debug-tests
+ctest --preset debug-tests
+```
+
+The test executable defines no CAppModule, so a header that includes framework.h
+cannot be tested. Extract the logic into a WTL-free module instead.
+
 ## CI
 
 GitHub Actions (`.github/workflows/build.yml`) runs a release build on every push to main,
 PR, and release publish, producing the `chirami-win64` artifact (chirami.exe, turbojpeg.dll,
 README.md, LICENSE, licenses/libjpeg-turbo.txt). On release publish it additionally attaches
 the ZIP to the release assets.
+
+A second job in the same workflow builds and runs the unit tests (the `tests` manifest
+feature); it shares the vcpkg pinning steps with the release job.
 
 - Runner is windows-latest (VS 2026). Locate MSVC via vswhere and call vcvars64; no
   third-party setup actions

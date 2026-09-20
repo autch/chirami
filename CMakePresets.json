@@ -29,6 +29,15 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "debug-tests",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/debug-tests",
+      "cacheVariables": {
+        "VCPKG_MANIFEST_FEATURES": "tests",
+        "CHIRAMI_BUILD_TESTS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -39,6 +48,19 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "debug-tests",
+      "configurePreset": "debug-tests"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug-tests",
+      "configurePreset": "debug-tests",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

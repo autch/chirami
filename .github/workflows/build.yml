@@ -87,3 +87,34 @@ jobs:
           $zip = "chirami-$env:TAG_NAME-win64.zip"
           Compress-Archive -Path dist\* -DestinationPath $zip
           gh release upload $env:TAG_NAME $zip --clobber
+
+  # The unit tests live behind the 'tests' manifest feature, so Catch2 is
+  # resolved here and never in the release job above.
+  tests:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same vcpkg pinning as the release job; see the comments there.
+      - name: Pin vcpkg to the manifest baseline
+        shell: pwsh
+        run: |
+          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          git -C $env:VCPKG_INSTALLATION_ROOT fetch --depth 1 origin $baseline
+          git -C $env:VCPKG_INSTALLATION_ROOT checkout --force $baseline
+          & "$env:VCPKG_INSTALLATION_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build and run the tests
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
+          if not defined VSPATH (echo Visual Studio with C++ tools not found & exit /b 1)
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+          set "VCPKG_ROOT=%VCPKG_INSTALLATION_ROOT%"
+          cmake --preset debug-tests
+          if errorlevel 1 exit /b 1
+          cmake --build --preset debug-tests
+          if errorlevel 1 exit /b 1
+          ctest --preset debug-tests
