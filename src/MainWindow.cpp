@@ -59,6 +59,26 @@ GUID ContainerFormatFromExtension(std::wstring extension)
     return GUID_NULL;
 }
 
+// The save dialog's file types, in the order SetFileTypes receives them.
+const GUID kSaveFilterFormats[] = {
+    GUID_ContainerFormatPng,
+    GUID_ContainerFormatJpeg,
+    GUID_ContainerFormatBmp,
+    GUID_ContainerFormatTiff,
+};
+
+UINT SaveFilterIndexFor(const GUID& container)
+{
+    for (UINT i = 0; i < ARRAYSIZE(kSaveFilterFormats); ++i)
+    {
+        if (kSaveFilterFormats[i] == container)
+        {
+            return i + 1;  // the dialog counts file types from 1
+        }
+    }
+    return 1;  // PNG
+}
+
 }  // namespace
 
 int MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/)
@@ -771,11 +791,37 @@ try
         {tiffName.c_str(), L"*.tif;*.tiff"},
     };
     THROW_IF_FAILED(dialog->SetFileTypes(ARRAYSIZE(filters), filters));
-    THROW_IF_FAILED(dialog->SetDefaultExtension(L"png"));
+
+    // Point the dialog at the open file - folder, name and format alike - so
+    // confirming it overwrites that file. The dialog asks before clobbering.
+    FILEOPENDIALOGOPTIONS options = 0;
+    THROW_IF_FAILED(dialog->GetOptions(&options));
+    THROW_IF_FAILED(dialog->SetOptions(options | FOS_OVERWRITEPROMPT));
+
+    std::wstring defaultExtension = L"png";
     if (!m_currentPath.empty())
     {
-        THROW_IF_FAILED(dialog->SetFileName(m_currentPath.stem().c_str()));
+        std::filesystem::path target = m_currentPath;
+        GUID container = ContainerFormatFromExtension(target.extension().wstring());
+        if (container == GUID_NULL)
+        {
+            // Decodable but not encodable (gif, webp, ...): offer PNG beside it.
+            container = GUID_ContainerFormatPng;
+            target.replace_extension(L".png");
+        }
+        THROW_IF_FAILED(dialog->SetFileTypeIndex(SaveFilterIndexFor(container)));
+        defaultExtension = ToLower(target.extension().wstring()).substr(1);  // drop the dot
+
+        wil::com_ptr<IShellItem> folder;
+        if (const auto parent = target.parent_path();
+            !parent.empty() && SUCCEEDED(SHCreateItemFromParsingName(
+                                   parent.c_str(), nullptr, IID_PPV_ARGS(folder.put()))))
+        {
+            THROW_IF_FAILED(dialog->SetFolder(folder.get()));
+        }
+        THROW_IF_FAILED(dialog->SetFileName(target.filename().c_str()));
     }
+    THROW_IF_FAILED(dialog->SetDefaultExtension(defaultExtension.c_str()));
 
     const HRESULT hr = dialog->Show(m_hWnd);
     if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))
@@ -795,15 +841,10 @@ try
     GUID container = ContainerFormatFromExtension(path.extension().wstring());
     if (container == GUID_NULL)
     {
-        static const GUID kByFilterIndex[] = {
-            GUID_ContainerFormatPng,
-            GUID_ContainerFormatJpeg,
-            GUID_ContainerFormatBmp,
-            GUID_ContainerFormatTiff,
-        };
         UINT typeIndex = 1;  // 1-based
         (void)dialog->GetFileTypeIndex(&typeIndex);
-        container = kByFilterIndex[std::clamp<UINT>(typeIndex, 1, ARRAYSIZE(kByFilterIndex)) - 1];
+        container =
+            kSaveFilterFormats[std::clamp<UINT>(typeIndex, 1, ARRAYSIZE(kSaveFilterFormats)) - 1];
     }
 
     if (!m_saver->RequestSave(std::move(path), container, m_cpuImage))
