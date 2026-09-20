@@ -25,6 +25,8 @@ inline constexpr UINT WM_APP_SAVE_DONE = WM_APP + 3;
 inline constexpr UINT WM_APP_PREFETCH_DONE = WM_APP + 4;
 inline constexpr UINT WM_APP_ASSOC_CHECK = WM_APP + 5;
 inline constexpr UINT WM_APP_METADATA_DONE = WM_APP + 6;
+// Posted after the window resizes itself; see OnRepaintFrame.
+inline constexpr UINT WM_APP_REPAINT_FRAME = WM_APP + 7;
 
 class MainWindow : public CWindowImpl<MainWindow>
 {
@@ -58,6 +60,7 @@ public:
         MESSAGE_HANDLER(WM_APP_PREFETCH_DONE, OnPrefetchDone)
         MESSAGE_HANDLER(WM_APP_ASSOC_CHECK, OnAssocCheck)
         MESSAGE_HANDLER(WM_APP_METADATA_DONE, OnMetadataDone)
+        MESSAGE_HANDLER(WM_APP_REPAINT_FRAME, OnRepaintFrame)
         COMMAND_ID_HANDLER(IDM_FILE_OPEN, OnFileOpen)
         COMMAND_ID_HANDLER(IDM_FILE_SAVEAS, OnFileSaveAs)
         COMMAND_ID_HANDLER(IDM_FILE_EXIT, OnFileExit)
@@ -257,6 +260,7 @@ private:
     MetadataItem DisplayFormatItem() const;
     std::vector<MetadataItem> BuildBasicMetadataItems() const;
     LRESULT OnMetadataDone(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnRepaintFrame(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
 
     // Rubber-band selection for crop / blackout (Phase 3 step 16)
     enum class SelectionPurpose

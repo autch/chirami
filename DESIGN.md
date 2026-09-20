@@ -65,7 +65,8 @@ Direct3D 12 はこの用途ではオーバーキル。使わない。
 
 **WTL と Direct2D の統合に関する注意:**
 
-- WM_PAINT では BeginPaint/EndPaint ではなく `ImageRenderer::Present` を使う（更新領域は ValidateRect で消す）
+- WM_PAINT は `BeginPaint`/`EndPaint`（WTL の `CPaintDC`）で囲み、その中で `ImageRenderer::Present` を呼ぶ。DC 自体は使わないが、**非クライアント領域（メニューバー・フレーム）の描画を駆動するのは BeginPaint** なので、`ValidateRect` で更新領域だけ消す書き方では、ウィンドウが広がったときに増えた部分のメニューバーが描き直されず、別の再描画要因が起きるまで背景が残る（2026-09 変更。それ以前は ValidateRect のみだった）
+- 自作コードでウィンドウをリサイズしたあとは、`WM_APP_REPAINT_FRAME` を自分に post し、**メッセージループが一回りしてから** `DwmFlush()` → `RedrawWindow(RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW)` でフレームを描き直す。これを怠ると、広がった側のメニューバーに背景が残る。リサイズ直後に同期的に描き直しても効かない（実測）: コンポジタがまだ新しいウィンドウ矩形を受け取っておらず、ダメージが古い矩形にクリップされるため。この post を外すと症状が再発することを確認済みで、**これが決め手**。あわせて、リサイズ前にスワップチェーンを新しいクライアントサイズへ合わせ（フレームが新サイズ・中身が旧サイズの瞬間をなくす）、`SetWindowPos` には `SWP_FRAMECHANGED` を付けている。症状の特徴は、**画面キャプチャを取ると消える**・**背面のウィンドウが再描画された部分だけ直る**こと。つまりウィンドウ自身の描画内容は正しく、DWM の合成だけが古い。WM_NCPAINT はフレーム全体で届いており、描画要求自体は出ていた（2026-09 追加。GeForce と Ryzen APU の両方で発生するため GPU ベンダーには依らない。コストは切り替えあたり +0.2ms 程度）
 - WM_SIZE で `ImageRenderer::Resize`（ResizeBuffers）。タイルは D2D デバイス上に残るため再アップロード不要
 - WTL の CWindowImpl は入力とウィンドウ寿命を担当し、描画本体は `ImageRenderer` に委譲する
 

@@ -54,6 +54,7 @@ target_link_libraries(chirami PRIVATE
     WIL::WIL
     d2d1
     d3d11
+    dwmapi
     dxguid
     dwrite
     windowscodecs

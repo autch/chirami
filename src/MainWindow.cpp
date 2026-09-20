@@ -10,6 +10,7 @@
 #include "resource.h"
 
 #include <commdlg.h>   // ChooseColorW
+#include <dwmapi.h>    // DwmFlush
 #include <shellapi.h>  // DragAcceptFiles, DragQueryFileW
 #include <shobjidl.h>     // IFileOpenDialog, IFileSaveDialog
 
@@ -819,6 +820,20 @@ try
 }
 CATCH_LOG()
 
+// Sent to itself after the window resized itself. The window's own pixels
+// are already right; what is stale is the composition of the strip the
+// window gained, which the compositor never marked dirty. DwmFlush waits
+// for it to catch up with the new bounds, then the frame is damaged again
+// so that region is composed. Removing this brings the artifact back, so it
+// is what actually fixes it - see DESIGN.md, "Rendering".
+LRESULT MainWindow::OnRepaintFrame(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                   BOOL& /*handled*/)
+{
+    (void)DwmFlush();
+    RedrawWindow(nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
+    return 0;
+}
+
 LRESULT MainWindow::OnSaveDone(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
                                BOOL& /*handled*/)
 {
@@ -1433,6 +1448,16 @@ void MainWindow::ResizeWindowToClient(int clientWidth, int clientHeight)
     windowWidth = std::max(windowWidth, GetSystemMetricsForDpi(SM_CXMINTRACK, m_dpi));
     windowHeight = std::max(windowHeight, GetSystemMetricsForDpi(SM_CYMINTRACK, m_dpi));
 
+    // Size the swap chain to the client area we are about to ask for,
+    // before the window itself changes. Resizing it afterwards (from
+    // WM_SIZE) leaves a moment where the compositor has the frame at the
+    // new size and the content at the old one.
+    if (m_renderer && clientWidth > 0 && clientHeight > 0)
+    {
+        LOG_IF_FAILED(m_renderer->Resize(static_cast<UINT>(clientWidth),
+                                         static_cast<UINT>(clientHeight)));
+    }
+
     // Keep the whole window inside the work area, moving it as little as
     // possible from where the user put it.
     const auto placeWindow = [&](int width, int height) {
@@ -1444,7 +1469,11 @@ void MainWindow::ResizeWindowToClient(int clientWidth, int clientHeight)
         const int y = std::clamp(static_cast<int>(windowRect.top), static_cast<int>(work.top),
                                  std::max(static_cast<int>(work.top),
                                           static_cast<int>(work.bottom) - height));
-        SetWindowPos(nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        // SWP_FRAMECHANGED: tell the system the frame changed, so the
+        // non-client area is recalculated and repainted as part of the
+        // resize instead of keeping what was composited there before.
+        SetWindowPos(nullptr, x, y, width, height,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     };
     placeWindow(windowWidth, windowHeight);
 
@@ -1467,6 +1496,12 @@ void MainWindow::ResizeWindowToClient(int clientWidth, int clientHeight)
             std::min(windowHeight + shortfall, static_cast<int>(work.bottom - work.top));
         placeWindow(windowWidth, windowHeight);
     }
+
+    // Repainting the frame synchronously here is not enough - measured: the
+    // compositor has not taken the new window bounds yet, so the damage is
+    // clipped to the old ones and the strip the window just gained is never
+    // composed. Ask for it once the message loop has turned instead.
+    PostMessage(WM_APP_REPAINT_FRAME);
 }
 
 void MainWindow::ToggleFullscreen()
@@ -2144,10 +2179,15 @@ void MainWindow::OnSize(UINT /*type*/, CSize size)
 
 void MainWindow::OnPaint(CDCHandle /*dc*/)
 {
-    // Direct2D presents by itself; no BeginPaint/EndPaint, but the update
-    // region must still be validated or WM_PAINT will be sent forever.
+    // Direct2D presents by itself and the device context goes unused, but
+    // the BeginPaint/EndPaint pair still has to happen: it is what drives
+    // the non-client paint (the menu bar and the frame) and what clears the
+    // update region. Validating the client area by hand instead ends the
+    // paint cycle before the frame is ever drawn, so a window that just grew
+    // keeps whatever was on screen behind the strip it gained, until some
+    // other event forces the frame to be repainted.
+    CPaintDC dc(m_hWnd);
     Render();
-    ValidateRect(nullptr);
 }
 
 void MainWindow::OnDestroy()
