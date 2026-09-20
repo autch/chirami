@@ -49,7 +49,15 @@ README.md, LICENSE, licenses/libjpeg-turbo.txt). On release publish it additiona
 the ZIP to the release assets.
 
 A second job in the same workflow builds and runs the unit tests (the `tests` manifest
-feature); it shares the vcpkg pinning steps with the release job.
+feature); it shares the vcpkg pinning steps with the release job and builds only the
+`chirami_tests` target, since the release job already builds the app.
+
+- Both jobs cache the vcpkg binary packages (`VCPKG_DEFAULT_BINARY_CACHE` under the
+  workspace, saved by actions/cache). Without it every run rebuilds libjpeg-turbo,
+  wtl and - in the tests job - catch2 from source, which is where the time goes: the
+  tests themselves run in under a second. The key is keyed on vcpkg.json (dependencies
+  and baseline) and the overlay triplet; each job keeps its own cache because they
+  install different sets
 
 - Runner is windows-latest (VS 2026). Locate MSVC via vswhere and call vcvars64; no
   third-party setup actions

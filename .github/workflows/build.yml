@@ -42,6 +42,18 @@ jobs:
           & "$env:VCPKG_INSTALLATION_ROOT\bootstrap-vcpkg.bat" -disableMetrics
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
+      # Without this, vcpkg rebuilds libjpeg-turbo, wtl and catch2 from
+      # source on every run (about a minute each). The key covers what
+      # decides the built packages - the manifest, which carries the
+      # dependencies and the baseline, and the overlay triplet. A miss only
+      # costs the rebuild it would have done anyway.
+      - name: Cache the vcpkg binary packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}\vcpkg-cache
+          key: vcpkg-${{ runner.os }}-release-${{ hashFiles('vcpkg.json', 'triplets/*.cmake') }}
+          restore-keys: vcpkg-${{ runner.os }}-release-
+
       - name: Configure and build (Release)
         shell: cmd
         run: |
@@ -53,6 +65,8 @@ jobs:
           rem CMakePresets.json expects VCPKG_ROOT; the runner image provides
           rem a preinstalled vcpkg via VCPKG_INSTALLATION_ROOT.
           set "VCPKG_ROOT=%VCPKG_INSTALLATION_ROOT%"
+          set "VCPKG_DEFAULT_BINARY_CACHE=%GITHUB_WORKSPACE%\vcpkg-cache"
+          if not exist "%VCPKG_DEFAULT_BINARY_CACHE%" mkdir "%VCPKG_DEFAULT_BINARY_CACHE%"
           cmake --preset release
           if errorlevel 1 exit /b 1
           cmake --build --preset release
@@ -106,6 +120,18 @@ jobs:
           & "$env:VCPKG_INSTALLATION_ROOT\bootstrap-vcpkg.bat" -disableMetrics
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
+      # Without this, vcpkg rebuilds libjpeg-turbo, wtl and catch2 from
+      # source on every run (about a minute each). The key covers what
+      # decides the built packages - the manifest, which carries the
+      # dependencies and the baseline, and the overlay triplet. A miss only
+      # costs the rebuild it would have done anyway.
+      - name: Cache the vcpkg binary packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}\vcpkg-cache
+          key: vcpkg-${{ runner.os }}-tests-${{ hashFiles('vcpkg.json', 'triplets/*.cmake') }}
+          restore-keys: vcpkg-${{ runner.os }}-tests-
+
       - name: Build and run the tests
         shell: cmd
         run: |
@@ -113,8 +139,12 @@ jobs:
           if not defined VSPATH (echo Visual Studio with C++ tools not found & exit /b 1)
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
           set "VCPKG_ROOT=%VCPKG_INSTALLATION_ROOT%"
+          set "VCPKG_DEFAULT_BINARY_CACHE=%GITHUB_WORKSPACE%\vcpkg-cache"
+          if not exist "%VCPKG_DEFAULT_BINARY_CACHE%" mkdir "%VCPKG_DEFAULT_BINARY_CACHE%"
           cmake --preset debug-tests
           if errorlevel 1 exit /b 1
-          cmake --build --preset debug-tests
+          rem Only the test executable; building the app is the release job's
+          rem business.
+          cmake --build --preset debug-tests --target chirami_tests
           if errorlevel 1 exit /b 1
           ctest --preset debug-tests
