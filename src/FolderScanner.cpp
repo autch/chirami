@@ -1,5 +1,5 @@
 #include "FolderScanner.h"
-#include "StringUtil.h"
+#include "PathCompare.h"
 #include "WicDecoders.h"
 
 #include <shlwapi.h>  // StrCmpLogicalW
@@ -50,7 +50,11 @@ try
     // Factory and extension set live below coInit so everything is released
     // before CoUninitialize; WIC objects never leave this thread.
     auto factory = wil::CoCreateInstance<IWICImagingFactory>(CLSID_WICImagingFactory);
-    m_extensions = QueryWicDecoderExtensions(factory.get());
+    // Folded once here so the per-file test below is a plain set lookup.
+    for (const std::wstring& extension : QueryWicDecoderExtensions(factory.get()))
+    {
+        m_extensions.insert(ToUpperInvariant(extension));
+    }
 
     while (true)
     {
@@ -116,7 +120,7 @@ std::vector<std::filesystem::path> FolderScanner::ScanFolder(const std::filesyst
         {
             continue;
         }
-        if (!m_extensions.contains(ToLower(it->path().extension().wstring())))
+        if (!m_extensions.contains(ToUpperInvariant(it->path().extension().native())))
         {
             continue;
         }

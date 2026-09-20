@@ -4,7 +4,9 @@
 find_package(Catch2 3 CONFIG REQUIRED)
 
 add_executable(chirami_tests
+    PathCompareTests.cpp
     ViewLayoutTests.cpp
+    "${CMAKE_SOURCE_DIR}/src/PathCompare.cpp"
 )
 
 target_include_directories(chirami_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")

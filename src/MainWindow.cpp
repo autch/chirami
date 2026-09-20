@@ -2,6 +2,7 @@
 #include "AppPaths.h"
 #include "FileAssociation.h"
 #include "ImageTransform.h"
+#include "PathCompare.h"
 #include "ResizeDialog.h"
 #include "StringUtil.h"
 #include "TurboJpeg.h"
@@ -38,22 +39,22 @@ UINT ErrorStringId(HRESULT hr)
     return IDS_ERR_FILE_OPEN;
 }
 
-GUID ContainerFormatFromExtension(std::wstring extension)
+GUID ContainerFormatFromExtension(std::wstring_view extension)
 {
-    extension = ToLower(std::move(extension));
-    if (extension == L".png")
+    if (EqualsNoCase(extension, L".png"))
     {
         return GUID_ContainerFormatPng;
     }
-    if (extension == L".jpg" || extension == L".jpeg" || extension == L".jfif")
+    if (EqualsNoCase(extension, L".jpg") || EqualsNoCase(extension, L".jpeg")
+        || EqualsNoCase(extension, L".jfif"))
     {
         return GUID_ContainerFormatJpeg;
     }
-    if (extension == L".bmp")
+    if (EqualsNoCase(extension, L".bmp"))
     {
         return GUID_ContainerFormatBmp;
     }
-    if (extension == L".tif" || extension == L".tiff")
+    if (EqualsNoCase(extension, L".tif") || EqualsNoCase(extension, L".tiff"))
     {
         return GUID_ContainerFormatTiff;
     }
@@ -175,7 +176,7 @@ void MainWindow::LoadFile(std::filesystem::path path)
     m_edgeWarned = false;
     m_openFirstAfterScan = false;  // an explicit file wins over a pending folder open
 
-    if (auto folder = m_currentPath.parent_path(); folder != m_currentFolder)
+    if (auto folder = m_currentPath.parent_path(); !PathsEqualNoCase(folder, m_currentFolder))
     {
         m_currentFolder = std::move(folder);
         m_folderFiles.clear();
@@ -803,7 +804,7 @@ try
     if (!m_currentPath.empty())
     {
         std::filesystem::path target = m_currentPath;
-        GUID container = ContainerFormatFromExtension(target.extension().wstring());
+        GUID container = ContainerFormatFromExtension(target.extension().native());
         if (container == GUID_NULL)
         {
             // Decodable but not encodable (gif, webp, ...): offer PNG beside it.
@@ -811,7 +812,9 @@ try
             target.replace_extension(L".png");
         }
         THROW_IF_FAILED(dialog->SetFileTypeIndex(SaveFilterIndexFor(container)));
-        defaultExtension = ToLower(target.extension().wstring()).substr(1);  // drop the dot
+        // Cosmetic only: the dialog appends this when a typed name has no
+        // extension, so it follows the open file in lowercase.
+        defaultExtension = ToLowerInvariant(std::wstring_view(target.extension().native()).substr(1));
 
         wil::com_ptr<IShellItem> folder;
         if (const auto parent = target.parent_path();
@@ -839,7 +842,7 @@ try
 
     // The typed extension decides the format; fall back to the selected
     // filter for unknown extensions.
-    GUID container = ContainerFormatFromExtension(path.extension().wstring());
+    GUID container = ContainerFormatFromExtension(path.extension().native());
     if (container == GUID_NULL)
     {
         UINT typeIndex = 1;  // 1-based

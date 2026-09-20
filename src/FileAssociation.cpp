@@ -1,6 +1,6 @@
 #include "FileAssociation.h"
 #include "AppPaths.h"
-#include "StringUtil.h"
+#include "PathCompare.h"
 #include "WicDecoders.h"
 
 #include <shellapi.h>  // ShellExecuteW
@@ -57,10 +57,11 @@ catch (...)
     return std::nullopt;  // an unreadable value counts as "not set"
 }
 
-// ".jpg" -> "JPG"
+// ".jpg" -> "JPG". The ProgID built from this is stored in the registry of
+// every user who registered, so the mapping must not drift.
 std::wstring ExtensionUpper(const std::wstring& extension)
 {
-    return ToUpper(extension.substr(1));
+    return ToUpperInvariant(std::wstring_view(extension).substr(1));
 }
 
 std::wstring ProgIdFor(const std::wstring& extension)

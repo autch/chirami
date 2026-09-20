@@ -1,7 +1,7 @@
 #pragma once
 
 #include "LoadedImage.h"
-#include "StringUtil.h"
+#include "PathCompare.h"
 
 #include <filesystem>
 #include <optional>

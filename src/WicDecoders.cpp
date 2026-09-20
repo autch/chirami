@@ -1,5 +1,5 @@
 #include "WicDecoders.h"
-#include "StringUtil.h"
+#include "PathCompare.h"
 
 std::unordered_set<std::wstring> QueryWicDecoderExtensions(IWICImagingFactory* factory)
 {
@@ -42,7 +42,7 @@ std::unordered_set<std::wstring> QueryWicDecoderExtensions(IWICImagingFactory* f
             const size_t end = (comma == std::wstring::npos) ? list.size() : comma;
             if (end > start)
             {
-                extensions.insert(ToLower(list.substr(start, end - start)));
+                extensions.insert(ToLowerInvariant(list.substr(start, end - start)));
             }
             if (comma == std::wstring::npos)
             {

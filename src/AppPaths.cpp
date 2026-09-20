@@ -1,7 +1,13 @@
 #include "AppPaths.h"
 
+// Guarded: the test target defines both on the command line, the app gets
+// them from framework.h, and this file is built into each.
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 
 #include <wil/stl.h>
