@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.30)
+﻿cmake_minimum_required(VERSION 3.30)
 
 project(chirami VERSION 0.1.2 LANGUAGES CXX)
 
@@ -44,10 +44,18 @@ add_executable(chirami WIN32
 
 target_include_directories(chirami PRIVATE "${WTL_INCLUDE_DIR}")
 
+# project(VERSION) is the single place the version is written; the About box
+# reads CHIRAMI_VERSION and the version resource is built from the parts.
+# These reach the resource compiler as well, which is what keeps the two in
+# step (the .rc used to carry its own hardcoded numbers and drifted).
 target_compile_definitions(chirami PRIVATE
     UNICODE
     _UNICODE
     "CHIRAMI_VERSION=L\"${PROJECT_VERSION}\""
+    CHIRAMI_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    CHIRAMI_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    CHIRAMI_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+    "CHIRAMI_VERSION_STRING=\"${PROJECT_VERSION}.0\""
 )
 
 target_link_libraries(chirami PRIVATE

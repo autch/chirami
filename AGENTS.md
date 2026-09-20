@@ -27,6 +27,15 @@ conventions, and workflow.
   x64-windows-static, except libjpeg-turbo which builds as a DLL (still static CRT) and is
   copied next to the exe by a post-build step
 
+## Version number
+
+`project(chirami VERSION ...)` in CMakeLists.txt is the only place to change it.
+The About box reads it through the `CHIRAMI_VERSION` define, and the version
+resource in chirami.rc is built from `CHIRAMI_VERSION_MAJOR/MINOR/PATCH` and
+`CHIRAMI_VERSION_STRING`, which reach the resource compiler as compile definitions.
+The `version` field in vcpkg.json is the manifest's own label, is not used for
+dependency resolution, and is deliberately left alone.
+
 ## Tests
 
 Unit tests are Catch2, kept behind the vcpkg manifest feature `tests` so a release
