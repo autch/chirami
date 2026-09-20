@@ -1,6 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.30)
 
-project(chirami VERSION 0.1.2 LANGUAGES CXX)
+project(chirami VERSION 0.1.3 LANGUAGES CXX)
 
 # Off by default: the tests need the vcpkg manifest feature of the same name,
 # so a release build never resolves Catch2. Use the debug-tests preset.
