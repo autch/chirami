@@ -1,10 +1,25 @@
 #include "ImageRenderer.h"
 
-#include <d2d1effects.h>  // CLSID_D2D1ColorMatrix
+#include "GainMapMath.h"
+
+#include <d2d1effects.h>  // CLSID_D2D1ColorMatrix, TableTransfer, ...
+#include <dxgi1_6.h>      // IDXGIOutput6 / DXGI_OUTPUT_DESC1
 
 #include <algorithm>
+#include <array>
 #include <utility>
 #include <vector>
+
+namespace
+{
+
+// Entries in the gain-map lookup table; the effect interpolates between them.
+constexpr size_t kGainTableSize = 256;
+
+// Windows composes scRGB at 1.0 == 80 nits (D2D1_SCENE_REFERRED_SDR_WHITE_LEVEL).
+constexpr float kScRgbWhiteNits = 80.0f;
+
+}  // namespace
 
 ImageRenderer::ImageRenderer(HWND hwnd, ID2D1Factory1* factory) : m_hwnd(hwnd), m_factory(factory)
 {
@@ -93,7 +108,7 @@ HRESULT ImageRenderer::EnsureDevice()
         m_d2dDevice = std::move(d2dDevice);
         m_d2dContext = std::move(context);
         m_whiteLevelEffect = std::move(whiteLevel);
-        (void)UpdateSdrWhiteLevel();
+        (void)UpdateDisplayLevels(true);
     }
     if (!m_targetBitmap)
     {
@@ -154,7 +169,29 @@ HRESULT ImageRenderer::CreateTargetBitmap()
     return S_OK;
 }
 
-bool ImageRenderer::UpdateSdrWhiteLevel()
+bool ImageRenderer::UpdateDisplayLevels(bool displayChanged)
+{
+    const float boost = QuerySdrBoost();
+    const bool boostChanged = boost != m_sdrBoost;
+    m_sdrBoost = boost;  // QueryDisplayHeadroom measures against it
+
+    const HMONITOR monitor = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST);
+    if (!displayChanged && !boostChanged && monitor == m_headroomMonitor)
+    {
+        return false;
+    }
+    m_headroomMonitor = monitor;
+    const float headroom = QueryDisplayHeadroom();
+    const bool headroomChanged = headroom != m_displayHeadroom;
+    if (headroomChanged)
+    {
+        m_displayHeadroom = headroom;
+        UpdateGainEffects();
+    }
+    return boostChanged || headroomChanged;
+}
+
+float ImageRenderer::QuerySdrBoost() const
 {
     float boost = 1.0f;
 
@@ -201,17 +238,65 @@ bool ImageRenderer::UpdateSdrWhiteLevel()
         }
     }
 
-    if (boost == m_sdrBoost)
+    return boost;
+}
+
+// Microsoft's advice for desktop apps: find the DXGI output the window
+// overlaps most (GetContainingOutput can return a stale one) and read its
+// capabilities from DXGI_OUTPUT_DESC1. A fresh factory each time, since one
+// created before a display change enumerates stale outputs.
+float ImageRenderer::QueryDisplayHeadroom() const
+{
+    RECT window{};
+    if (!GetWindowRect(m_hwnd, &window))
     {
-        return false;
+        return 1.0f;
     }
-    m_sdrBoost = boost;
-    return true;
+    wil::com_ptr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.put()))))
+    {
+        return 1.0f;
+    }
+
+    DXGI_OUTPUT_DESC1 best{};
+    long bestArea = -1;
+    wil::com_ptr<IDXGIAdapter1> adapter;
+    for (UINT a = 0; factory->EnumAdapters1(a, adapter.put()) != DXGI_ERROR_NOT_FOUND; ++a)
+    {
+        wil::com_ptr<IDXGIOutput> output;
+        for (UINT o = 0; adapter->EnumOutputs(o, output.put()) != DXGI_ERROR_NOT_FOUND; ++o)
+        {
+            const auto output6 = output.try_query<IDXGIOutput6>();
+            DXGI_OUTPUT_DESC1 desc{};
+            if (!output6 || FAILED(output6->GetDesc1(&desc)))
+            {
+                continue;
+            }
+            RECT overlap{};
+            const long area = IntersectRect(&overlap, &window, &desc.DesktopCoordinates)
+                                  ? (overlap.right - overlap.left) * (overlap.bottom - overlap.top)
+                                  : 0;
+            if (area > bestArea)
+            {
+                bestArea = area;
+                best = desc;
+            }
+        }
+    }
+
+    // Only an HDR (PQ) output reproduces anything above SDR white.
+    if (bestArea < 0 || best.ColorSpace != DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+    {
+        return 1.0f;
+    }
+    const float sdrWhiteNits = kScRgbWhiteNits * m_sdrBoost;
+    return std::max(best.MaxLuminance / sdrWhiteNits, 1.0f);
 }
 
 void ImageRenderer::DiscardDevice()
 {
     m_tiles.clear();
+    m_gainBitmap.reset();
     m_textBrush.reset();
     if (m_d2dContext)
     {
@@ -229,11 +314,12 @@ void ImageRenderer::DiscardDevice()
 void ImageRenderer::ClearTiles()
 {
     m_tiles.clear();
+    m_gainBitmap.reset();
 }
 
 HRESULT ImageRenderer::UploadImage(const LoadedImage& image)
 {
-    m_tiles.clear();
+    ClearTiles();
 
     // Images beyond the GPU's maximum bitmap size are split into tiles.
     // 8192 keeps individual allocations moderate on any modern GPU.
@@ -249,6 +335,27 @@ HRESULT ImageRenderer::UploadImage(const LoadedImage& image)
                                     : DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
                           D2D1_ALPHA_MODE_PREMULTIPLIED));
     const uint32_t bytesPerPixel = image.BytesPerPixel();
+
+    // The gain map uploads as plain UNORM (it is not sRGB-encoded) and must
+    // fit in one bitmap. One that does not - never seen in practice, maps
+    // are about half the base - just leaves the image SDR.
+    const PixelBuffer& map = image.gainMap.map;
+    if (image.gainMap && map.format == PixelBuffer::Format::Bgra8 && map.width <= tileEdge
+        && map.height <= tileEdge)
+    {
+        const HRESULT hr = m_d2dContext->CreateBitmap(
+            D2D1::SizeU(map.width, map.height), map.pixels.data(), map.stride,
+            D2D1::BitmapProperties(
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)),
+            m_gainBitmap.put());
+        if (FAILED(hr))
+        {
+            LOG_HR(hr);
+            m_gainBitmap.reset();
+        }
+        m_contentHeadroom = image.gainMap.headroom;
+        m_toSrgb = image.toSrgb.value_or(ColorMatrix3{1, 0, 0, 0, 1, 0, 0, 0, 1});
+    }
 
     for (uint32_t y = 0; y < image.height; y += tileEdge)
     {
@@ -279,13 +386,120 @@ HRESULT ImageRenderer::UploadImage(const LoadedImage& image)
                 image.stride, properties, tile.bitmap.put());
             if (FAILED(hr))
             {
-                m_tiles.clear();
+                ClearTiles();
                 return hr;
+            }
+            if (m_gainBitmap)
+            {
+                if (const HRESULT gainHr = CreateGainEffects(tile, image); FAILED(gainHr))
+                {
+                    // Show the SDR base rather than nothing.
+                    LOG_HR(gainHr);
+                    tile.gainTable.reset();
+                    tile.colorMatrix.reset();
+                }
             }
             m_tiles.push_back(std::move(tile));
         }
     }
+    UpdateGainEffects();
     return S_OK;
+}
+
+// Per tile: the gain map, stretched over the whole image and shifted into
+// this tile's bitmap coordinates, goes through a lookup table (gain ->
+// boost / divisor), multiplies the linear base pixels, and a color matrix
+// multiplies the divisor back in while converting the base's primaries to
+// sRGB. The table and the matrix depend on the display and are filled in
+// by UpdateGainEffects. See DESIGN.md, "HDR gain map".
+HRESULT ImageRenderer::CreateGainEffects(ImageTile& tile, const LoadedImage& image)
+{
+    const D2D1_SIZE_U mapSize = m_gainBitmap->GetPixelSize();
+
+    wil::com_ptr<ID2D1Effect> stretch;
+    RETURN_IF_FAILED(m_d2dContext->CreateEffect(CLSID_D2D12DAffineTransform, stretch.put()));
+    stretch->SetInput(0, m_gainBitmap.get());
+    const D2D1_MATRIX_3X2_F transform =
+        D2D1::Matrix3x2F::Scale(static_cast<float>(image.width) / mapSize.width,
+                                static_cast<float>(image.height) / mapSize.height)
+        * D2D1::Matrix3x2F::Translation(-tile.withGutter.left, -tile.withGutter.top);
+    RETURN_IF_FAILED(stretch->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX, transform));
+    RETURN_IF_FAILED(stretch->SetValue(D2D1_2DAFFINETRANSFORM_PROP_INTERPOLATION_MODE,
+                                       D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_LINEAR));
+    // Hard edges: a soft border would fade the gain to zero at the image edge.
+    RETURN_IF_FAILED(stretch->SetValue(D2D1_2DAFFINETRANSFORM_PROP_BORDER_MODE,
+                                       D2D1_BORDER_MODE_HARD));
+
+    wil::com_ptr<ID2D1Effect> table;
+    RETURN_IF_FAILED(m_d2dContext->CreateEffect(CLSID_D2D1TableTransfer, table.put()));
+    table->SetInputEffect(0, stretch.get());
+    RETURN_IF_FAILED(table->SetValue(D2D1_TABLETRANSFER_PROP_ALPHA_DISABLE, TRUE));
+
+    // Output = A * input0 * input1 (B, C, D zero). Both inputs are
+    // premultiplied and the map is opaque, so alpha passes through intact.
+    wil::com_ptr<ID2D1Effect> multiply;
+    RETURN_IF_FAILED(m_d2dContext->CreateEffect(CLSID_D2D1ArithmeticComposite, multiply.put()));
+    multiply->SetInput(0, tile.bitmap.get());
+    multiply->SetInputEffect(1, table.get());
+    RETURN_IF_FAILED(multiply->SetValue(D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS,
+                                        D2D1::Vector4F(1.0f, 0.0f, 0.0f, 0.0f)));
+
+    // Applied straight to the premultiplied values: the matrix is linear in
+    // RGB and leaves alpha alone, so premultiplication commutes with it.
+    wil::com_ptr<ID2D1Effect> matrix;
+    RETURN_IF_FAILED(m_d2dContext->CreateEffect(CLSID_D2D1ColorMatrix, matrix.put()));
+    matrix->SetInputEffect(0, multiply.get());
+    RETURN_IF_FAILED(matrix->SetValue(D2D1_COLORMATRIX_PROP_ALPHA_MODE,
+                                      D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED));
+
+    // An effect's output otherwise follows its inputs' precision - 8-bit
+    // UNORM here - which clamps the boosted values to 1.0 (measured: the
+    // highlights stopped exactly at SDR white) and quantizes the linear
+    // pixels.
+    for (ID2D1Effect* effect : {stretch.get(), table.get(), multiply.get(), matrix.get()})
+    {
+        RETURN_IF_FAILED(
+            effect->SetValue(D2D1_PROPERTY_PRECISION, D2D1_BUFFER_PRECISION_16BPC_FLOAT));
+    }
+
+    tile.gainTable = std::move(table);
+    tile.colorMatrix = std::move(matrix);
+    return S_OK;
+}
+
+void ImageRenderer::UpdateGainEffects()
+{
+    if (!m_gainBitmap)
+    {
+        return;
+    }
+    std::array<float, kGainTableSize> table{};
+    const float divisor = BuildAppleGainTable(
+        m_contentHeadroom, GainMapWeight(m_displayHeadroom, m_contentHeadroom), table);
+
+    // D2D1_MATRIX_5X4_F multiplies a row vector (out = [r g b a 1] * M), so
+    // m_toSrgb, written for column vectors, goes in transposed.
+    const ColorMatrix3& m = m_toSrgb;
+    const D2D1_MATRIX_5X4_F color = D2D1::Matrix5x4F(
+        divisor * m[0], divisor * m[3], divisor * m[6], 0.0f,  //
+        divisor * m[1], divisor * m[4], divisor * m[7], 0.0f,  //
+        divisor * m[2], divisor * m[5], divisor * m[8], 0.0f,  //
+        0.0f, 0.0f, 0.0f, 1.0f,                                //
+        0.0f, 0.0f, 0.0f, 0.0f);
+
+    const auto* bytes = reinterpret_cast<const BYTE*>(table.data());
+    const auto size = static_cast<UINT32>(sizeof(table));
+    for (auto& tile : m_tiles)
+    {
+        if (!tile.gainTable)
+        {
+            continue;
+        }
+        (void)tile.gainTable->SetValue(D2D1_TABLETRANSFER_PROP_RED_TABLE, bytes, size);
+        (void)tile.gainTable->SetValue(D2D1_TABLETRANSFER_PROP_GREEN_TABLE, bytes, size);
+        (void)tile.gainTable->SetValue(D2D1_TABLETRANSFER_PROP_BLUE_TABLE, bytes, size);
+        (void)tile.colorMatrix->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, color);
+    }
 }
 
 HRESULT ImageRenderer::Present(D2D1_COLOR_F background, const ViewLayout* layout,
@@ -359,8 +573,23 @@ void ImageRenderer::DrawTiles(const ViewLayout& layout)
                         tile.source.top - tile.withGutter.top,
                         tile.source.right - tile.withGutter.left,
                         tile.source.bottom - tile.withGutter.top);
-        m_d2dContext->DrawBitmap(tile.bitmap.get(), dest, 1.0f,
-                                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &src);
+        if (tile.colorMatrix)
+        {
+            // The effect output is in the tile bitmap's pixel coordinates;
+            // map them onto the view the same way DrawBitmap does below.
+            m_d2dContext->SetTransform(
+                D2D1::Matrix3x2F::Scale(layout.scale, layout.scale)
+                * D2D1::Matrix3x2F::Translation(layout.destX + tile.withGutter.left * layout.scale,
+                                                layout.destY + tile.withGutter.top * layout.scale));
+            m_d2dContext->DrawImage(tile.colorMatrix.get(), D2D1::Point2F(src.left, src.top), src,
+                                    D2D1_INTERPOLATION_MODE_LINEAR);
+            m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
+        }
+        else
+        {
+            m_d2dContext->DrawBitmap(tile.bitmap.get(), dest, 1.0f,
+                                     D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &src);
+        }
     }
     m_d2dContext->SetAntialiasMode(previousMode);
 }

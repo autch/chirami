@@ -23,6 +23,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 - GPU のテクスチャ上限を超える巨大画像（8K・16K 超）もタイル分割で表示（約 23000×23000 まで） / Images beyond the GPU texture limit (8K, 16K+) display through tiling, up to roughly 23000x23000
 - アニメーション GIF / WebP の再生（フレーム遅延・部分フレーム・透過に対応） / Animated GIF / WebP playback honoring frame delays, partial frames, and transparency
 - HDR 対応の描画パイプライン（FP16 scRGB スワップチェーン。16bit・float・10bit の高精度画像は精度を保ったまま表示され、HDR ディスプレイでは SDR 白を超える輝度も再現） / HDR-capable rendering pipeline (FP16 scRGB swap chain; 16-bit, float, and 10-bit images keep their precision, with brighter-than-SDR highlights on HDR displays)
+- iPhone の HDR 写真（HEIC のゲインマップ）を HDR ディスプレイで HDR 表示（ディスプレイの明るさに合わせて調整。Microsoft Store の「HEIF 画像拡張機能」が必要。保存は SDR のみ） / iPhone HDR photos (HEIC gain maps) shown in HDR on HDR displays, adapted to the display's brightness (requires the "HEIF Image Extensions" from the Microsoft Store; saving is SDR only)
 - フィット・等倍・自由ズーム、ドラッグでのパン、必要な軸のみのスクロールバー / Fit, actual-size, and free zoom with drag panning and per-axis scrollbars
 - 同一フォルダ内を前後移動（並び順は名前/更新日時/サイズ・昇順/降順を選択可、既定はエクスプローラーと同じ自然順。隠しファイルは対象外） / Flips through the folder (sort by name/date/size, ascending/descending; Explorer-like natural order by default; hidden files are skipped)
 - ファイルでもフォルダでも開ける（D&D・関連付け・コマンドライン。フォルダは中の最初の画像を表示） / Opens files and folders alike (drag & drop, file association, command line; a folder opens to its first image)

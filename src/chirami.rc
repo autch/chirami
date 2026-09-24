@@ -59,6 +59,7 @@ BEGIN
     IDS_META_ERROR           L"メタデータを取得できません"
     IDS_META_DISPLAYFORMAT   L"表示形式"
     IDS_DEBUG_MARK           L" [DEBUG]"
+    IDS_CONFIRM_SAVE_SDR     L"この画像は HDR 写真ですが、保存できるのは SDR の画像だけです（HDR の情報は失われます）。\n保存を続けますか?"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -193,6 +194,7 @@ BEGIN
     IDS_META_ERROR           L"Cannot read metadata"
     IDS_META_DISPLAYFORMAT   L"Display format"
     IDS_DEBUG_MARK           L" [DEBUG]"
+    IDS_CONFIRM_SAVE_SDR     L"This is an HDR photo, but it can only be saved as SDR (the HDR information will be lost).\nDo you want to continue?"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78

@@ -740,6 +740,15 @@ try
     {
         return;
     }
+    // Only the SDR base is ever written; say so before the user picks a
+    // name. See DESIGN.md, "HDR gain map".
+    if (m_cpuImage.gainMap
+        && MessageBoxW(LoadStringResource(IDS_CONFIRM_SAVE_SDR).c_str(),
+                       LoadStringResource(IDS_APP_TITLE).c_str(), MB_OKCANCEL | MB_ICONWARNING)
+               != IDOK)
+    {
+        return;
+    }
     auto dialog = wil::CoCreateInstance<IFileSaveDialog>(CLSID_FileSaveDialog);
 
     // Names are resources, so they have to outlive the COMDLG_FILTERSPEC
@@ -1231,15 +1240,28 @@ void MainWindow::RequestMetadataForCurrent()
     m_metadataWindow.SetItems(BuildBasicMetadataItems());
 }
 
-// What the viewer actually decoded into and renders from: 8-bit SDR, or FP16
-// scRGB for high-precision/HDR sources. Useful alongside the file's native
-// pixel format to see which rendering path an image takes.
+// What the viewer actually decoded into and renders from: 8-bit SDR, FP16
+// scRGB for high-precision/HDR sources, or 8-bit SDR lifted by a gain map.
+// Useful alongside the file's native pixel format to see which rendering
+// path an image takes.
 MetadataItem MainWindow::DisplayFormatItem() const
 {
-    return {MetadataGroup::Image, LoadStringResource(IDS_META_DISPLAYFORMAT),
-            m_cpuImage.format == LoadedImage::Format::Rgba16F
-                ? L"64bpp RGBA half float (scRGB / HDR)"
-                : L"32bpp BGRA (SDR)"};
+    std::wstring format;
+    if (m_cpuImage.format == LoadedImage::Format::Rgba16F)
+    {
+        format = L"64bpp RGBA half float (scRGB / HDR)";
+    }
+    else if (m_cpuImage.gainMap)
+    {
+        format = std::format(L"32bpp BGRA + HDR gain map {} × {} (headroom {:.2f})",
+                             m_cpuImage.gainMap.map.width, m_cpuImage.gainMap.map.height,
+                             m_cpuImage.gainMap.headroom);
+    }
+    else
+    {
+        format = L"32bpp BGRA (SDR)";
+    }
+    return {MetadataGroup::Image, LoadStringResource(IDS_META_DISPLAYFORMAT), std::move(format)};
 }
 
 std::vector<MetadataItem> MainWindow::BuildBasicMetadataItems() const
@@ -2027,7 +2049,7 @@ void MainWindow::OnVScroll(int code, short /*pos*/, HWND /*scrollBar*/)
 
 void MainWindow::OnMove(CPoint /*position*/)
 {
-    if (m_renderer && m_renderer->HasDevice() && m_renderer->UpdateSdrWhiteLevel())
+    if (m_renderer && m_renderer->HasDevice() && m_renderer->UpdateDisplayLevels())
     {
         Invalidate(FALSE);  // the window may have crossed monitors
     }
@@ -2036,7 +2058,7 @@ void MainWindow::OnMove(CPoint /*position*/)
 LRESULT MainWindow::OnDisplayChange(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
                                     BOOL& /*handled*/)
 {
-    if (m_renderer && m_renderer->HasDevice() && m_renderer->UpdateSdrWhiteLevel())
+    if (m_renderer && m_renderer->HasDevice() && m_renderer->UpdateDisplayLevels(true))
     {
         Invalidate(FALSE);  // HDR toggled or the SDR brightness changed
     }

@@ -45,7 +45,7 @@ public:
 
     void Put(std::filesystem::path path, LoadedImage image)
     {
-        if (image.pixels.size() > kMaxTotalBytes)
+        if (image.TotalBytes() > kMaxTotalBytes)
         {
             return;
         }
@@ -86,7 +86,7 @@ private:
         size_t total = 0;
         for (const auto& entry : m_entries)
         {
-            total += entry.image.pixels.size();
+            total += entry.image.TotalBytes();
         }
         return total;
     }

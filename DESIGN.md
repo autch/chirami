@@ -58,7 +58,7 @@ libjpeg-turbo は導入済み（詳細はロードマップ Phase 4 ステップ
 - ウィンドウリサイズは ResizeBuffers（タイルは D2D デバイス上に残るため再アップロード不要）。デバイスロストは DXGI_ERROR_DEVICE_REMOVED / RESET を検知して全再構築
 - **SDR 白レベル補正**: HDR（詳細カラー）有効時、DWM は通常の SDR ウィンドウを SDR 輝度設定（例 240 nits）まで増幅する一方、scRGB サーフェスは 1.0 = 80 nits 固定で合成する。そのままでは chirami だけ暗くなるため、モニタの SDR 白レベル（DISPLAYCONFIG_SDR_WHITE_LEVEL）を取得し、シーンを中間 FP16 ビットマップに描いてから ColorMatrix エフェクトで白レベル倍して合成する。SDR ディスプレイでは倍率 1 で直描き。ウィンドウ移動（モニタ跨ぎ）と WM_DISPLAYCHANGE で再取得
 - 既知の制限 1: PQ (HDR10) など明示的な伝達関数を持つソースの色変換は未対応（WIC の変換に任せた範囲で表示）。必要になったらカラーコンテキスト + ColorManagement エフェクトで対応する
-- 既知の制限 2: iPhone の HDR 写真（SDR ベース + HDR ゲインマップ構造）は、WIC がゲインマップ（補助画像）を公開しないため SDR レンディションでの表示になる。ハイライトが SDR 白を超えて光る効果は再現されない。ICC プロファイル（Display P3 等）による色域変換も未対応
+- ~~既知の制限 2~~（2026-09 解消）: iPhone の HDR 写真（SDR ベース + HDR ゲインマップ構造）は、以前は SDR レンディションでの表示だった。当初の理由は「WIC がゲインマップ（補助画像）を公開しない」だったが、現行の HEIF 拡張では取り出せるため、ゲインマップを合成して HDR で表示するようにした（「HDR ゲインマップ」参照）。ICC プロファイルによる色域変換は、ゲインマップ付き画像の Display P3 だけに行う。それ以外の画像の ICC は引き続き未対応
 - 画像の補間付きリサイズは Direct2D の補間モード指定で対応
 
 Direct3D 12 はこの用途ではオーバーキル。使わない。
@@ -71,6 +71,65 @@ Direct3D 12 はこの用途ではオーバーキル。使わない。
 - WTL の CWindowImpl は入力とウィンドウ寿命を担当し、描画本体は `ImageRenderer` に委譲する
 
 **ビュー計算:** 倍率・パン・配置は `ComputeViewLayout`（`ViewLayout.h`）の純粋関数で求める。パンのクランプは戻り値（`panX` / `panY` と、そこから決まる `dest`）に含め、ウィンドウ側は `CommitPan` でメンバーへ書き戻す。描画・ヒットテスト・スクロールは同じ layout を共有する。表示サイズのピクセル丸めも同ヘッダにあり、スクロールバーの要否判定とズーム後のウィンドウ自動リサイズが layout と一致する。
+
+### HDR ゲインマップ（設計決定 2026-09、実装済み — Phase 4 ステップ 26）
+
+iPhone の HEIC は「SDR のベース画像 + 輝度の倍率を持つゲインマップ」で HDR を表す。これを合成して HDR ディスプレイで SDR 白を超えて光らせる。
+
+**経緯。** 「既知の制限 2」は、当時の WIC がゲインマップを公開しなかったための技術的制約であり、非対応を決めたものではない。libheif（LGPL、依存が膨大）は当面不採用のままとし、WIC だけで実現する。
+
+**WIC での取り出し方（Microsoft Learn に記載あり）:**
+
+- `IWICBitmapFrameChainReader::GetChainedFrame(WICBitmapChainType_GainMap, 0, ...)` でゲインマップをフレームとして取得する。そのフレームのメタデータ（XMP）も読める。対応は HEIF と JPEG XL。ヘッダは Windows SDK 10.0.26100.6584 以降の wincodec.h
+- 旧来の経路として、`IWICBitmapSourceTransform::CopyPixels` に `GUID_WICPixelFormat8bppGain` を指定しても取れる（HEIF extension codec のページ。「gain information is exposed as-is」で、合成はアプリの責任）
+- どちらのページにも最小 OS の記載がない。HEIF 拡張は Store の拡張機能なので、実際に使えるかは拡張のバージョン次第と考えられる。**QueryInterface や GetClosestPixelFormat が失敗したら現状どおり SDR で表示する**
+- `IWICBitmapToneMapper` / `IWICDisplayAdaptationControl2`（SDK にはあるが Learn のページが存在しない）は使わない。実機で試した結果、GainMap モードを指定しても出力は 32bpp BGR のまま、トーンマッパーは `WINCODEC_ERR_UNSUPPORTEDTONEMAPPING` だった
+
+**実機での確認（2026-09、Microsoft HEIF Decoder、2026-08 撮影の iPhone HEIC）:** 主画像 3024×4032 / 32bpp BGR / ICC 1 件に対し、ゲインマップは 1512×2016（縦横それぞれ半分）/ 8bpp Gray。ゲインマップフレームの XMP に `HDRGainMap:HDRGainMapVersion`（131072）と `HDRGainMap:HDRGainMapHeadroom`（4.48）がある。ISO 21496-1 の `tmap` が同時に入っているかは未確認。
+
+**決定事項:**
+
+- **形式は Apple 独自形式から対応する。** ISO 21496-1 は後から足す。Skia と同様、両形式を共通のパラメータ構造（比率の最小/最大・ガンマ・オフセット・headroom など）に読み込み、合成処理は 1 つにする。こうしておけば、形式を足しても変わるのは読み込み部分だけになる
+- **ディスプレイへの合わせ方は Skia 方式とする。** ディスプレイの headroom（最大輝度 / SDR 白）に応じた重み W を対数空間で求め、ゲインを `exp(L * W)` として掛ける。Ultra HDR 仕様も同じ考え方で、単純な線形補間は最大ブースト時以外の階調関係を崩すと明記している
+  - Skia の Apple 形式: `L = log(1 + (headroom - 1) * G^1.961)`（G はゲインマップの 0..1 値）、`W = clamp((log(表示 headroom) - log(1)) / (log(headroom) - log(1)), 0, 1)`、`HDR = SDR_linear * exp(L * W)`。Apple 公式ページ「Applying Apple HDR effect to your photos」とは実装時に突き合わせる
+  - ベース画像は Display P3 なので、リニア化してから P3 → Rec.709 行列で scRGB に移す（ゲインマップ仕様は「ベース画像の色プロファイルが HDR 画像の色空間を定める」としている）。これで既知の制限 2 の色域の件も HEIC については解消する
+  - 表示 headroom の分母は既存の SDR 白レベル（DISPLAYCONFIG_SDR_WHITE_LEVEL）、分子は `DXGI_OUTPUT_DESC1::MaxLuminance`。出力は Microsoft のガイドに従い、ウィンドウとの重なりが最大の DXGI 出力を列挙で選ぶ（`GetContainingOutput` は古い出力を返すので使わない）。再取得の契機は既存の白レベルと同じ（ウィンドウ移動、WM_DISPLAYCHANGE）
+- **合成は描画時に GPU で行う。** Skia と HDRImageViewer がそうしている。モニタを移動して headroom が変わっても再デコード不要で、W を変えるだけで済む。CPU 側はベース画像（Bgra8）とゲインマップを別々に保持する
+- **保存は SDR のみ。** ゲインマップ適用中の画像を保存するときは「SDR で保存される」ことを確認してから保存する（確認文言は STRINGTABLE）。HDR のまま保存できる形式は当面用意しない。ベース画像を別に持つので、保存するのはベース画像（編集を反映したもの）になる。HDRImageViewer も書き出しではゲインマップを無視してベース画像を使っている
+
+**実装:**
+
+- **データ:** `LoadedImage` は画素（`PixelBuffer`）に `HdrGainMap`（ゲインマップの画素 + headroom）と `toSrgb`（ベースの原色 → sRGB の 3×3 行列）を足したもの。ゲインマップは R=G=B に値を入れた Bgra8 で持つ。こうすると回転・反転・クロップ・リサイズと GPU への転送が、通常の画像と同じ処理で済む（メモリは 8bpp の 4 倍になるが、半分の解像度なので 12MP の写真で約 12 MB）
+- **読み込み（`ImageLoader`）:** ベース画像を従来どおり Bgra8 でデコードしたあと、`IWICBitmapFrameChainReader` でゲインマップのフレームを取り、XMP の `HDRGainMap:HDRGainMapHeadroom`（クエリパス `/xmp/http\:\/\/ns.apple.com\/HDRGainMap\/1.0\/:HDRGainMapHeadroom`）を読む。ゲインマップのフレームに無ければ主画像の XMP も見る。チェーンが無い・headroom が 1 以下・デコード失敗のいずれでも、ゲインマップなしの SDR 表示になる。`8bppGain` の旧経路は実装していない（チェーンで取れない環境があれば追加を検討する）。高精度ソース（FP16 経路）にはゲインマップを付けない
+- **色域:** 主画像の ICC が、3 つの TRC がすべて sRGB カーブ（parametric type 3）の行列型プロファイルなら、`IccProfile` がその原色から sRGB への行列を計算する（Bradford で D50 → D65）。iPhone の Display P3 はこれに当たる。それ以外の ICC は変換しない
+- **ゲインの計算（`GainMapMath`）:** 重み W と、256 段のテーブル `boost(g)^W / 最大値` を作る。Direct2D のテーブル変換は 0..1 に収める必要があるので最大値で割り、割った分は後段の色行列で掛け戻す
+- **描画（`ImageRenderer`）:** タイルごとに `2DAffineTransform`（ゲインマップを画像全体に引き伸ばし、そのタイルの座標にずらす。境界は HARD。SOFT だと画像の縁でゲインが 0 に落ちる）→ `TableTransfer`（ゲイン → 倍率）→ `ArithmeticComposite`（ベースとの積）→ `ColorMatrix`（最大値を掛け戻す + 原色変換。乗算済みアルファのまま適用）のグラフを作り、`DrawBitmap` の代わりに `DrawImage` する。テーブルと行列は表示 headroom が変わったときに差し替える。既存の SDR 白レベル補正はシーン全体に掛かるので、その前段で「SDR 白 = 1.0」の値として合成すればよい
+- **エフェクトの精度が要。** 各エフェクトに `D2D1_PROPERTY_PRECISION = 16BPC_FLOAT` を指定しないと、入力（8bit のタイル）に合わせて出力が 8bit UNORM になり、SDR 白でちょうど頭打ちになる（実測）。デバイスコンテキストの `SetRenderingControls` で精度を指定しても効かなかった
+- **表示 headroom:** `DXGI_OUTPUT_DESC1` の色空間が PQ（`G2084_NONE_P2020`）の出力だけを HDR とみなし、`MaxLuminance / (80 nits × SDR 白の倍率)` とする。WM_MOVE のたびに DXGI ファクトリを作り直さないよう、モニタが変わったとき・SDR 白が変わったとき・WM_DISPLAYCHANGE のときだけ読み直す
+- **編集:** 回転・反転はゲインマップにも同じ変換を掛ける。クロップはベースの範囲を比率でゲインマップに写し、外側に丸める（1 画素以上残す）。リサイズはゲインマップを同じ比率で縮める。黒塗りはゲインマップに触れない（倍率を掛けても黒は黒）
+- **キャッシュ:** 先読みキャッシュの上限（512 MiB）の計算にゲインマップの分も含める
+- **表示形式:** プロパティの「表示形式」に `32bpp BGRA + HDR gain map 幅 × 高さ (headroom x.xx)` と出す
+- **保存:** 名前を付けて保存の前に、ゲインマップ付き画像なら確認（OK / キャンセル）を出す（`IDS_CONFIRM_SAVE_SDR`）。保存されるのはベース画像（編集後）
+
+**実機での検証（2026-09、HDR 有効・最大 604 nits・SDR 白 240 nits のモニタ）:** デスクトップ複製（`IDXGIOutput5::DuplicateOutput1`、FP16）で合成後の画面を scRGB のまま取り込んで測った。
+
+- headroom 4.48 の写真: 最大 568 nits まで光る（W ≈ 0.61）。光る部分は筐体の白・LED・画面の文字など、ゲインマップどおりの位置
+- headroom 5.04 の写真（5712×3213、ゲインマップ 2856×1607 でちょうど半分ではない）: 最大 604 nits = モニタの最大輝度ちょうど（W で上限に合わせた結果）。回転・左右反転の後も光る部分が画像に追従する
+- ゲインマップの無い画像は変更前のビルドと画素一致（SDR の DNG で比較。差はウィンドウの角丸から見える背景だけ）。FP16 の JPEG XR（1.0 と 4.0）も 240 / 960 nits で変わらず
+- 保存の確認ダイアログが出て、キャンセルすると保存ダイアログに進まない
+- クロップ・リサイズ・黒塗りの後も表示が正しいこと、SDR 表示（HDR オフ。W = 0 で原色変換だけが掛かる）で正しく見えることを、ユーザーが実機で確認した
+- プローブで一度起きた「ゲインマップ取得後に主画像のデコードが返らない」現象は、ローダーと同じ条件（メモリストリーム・MTA）ではどちらの順序でも再現しなかった（主画像 140〜250ms、ゲインマップ 50〜80ms）。当時のプローブは 1 行ずつ `CopyPixels` していて、その都度全体をデコードしていたのが原因と考えられる
+
+**未確認・未決:**
+
+- 8192px を超えてタイル分割される画像と、ゲインマップの組み合わせは実物が無く未確認（コード上はタイルごとに座標をずらして対応している）
+- Apple 公式ページ「Applying Apple HDR effect to your photos」の式との突き合わせ（ページが JavaScript 描画で取得できなかった）
+- 今の `HdrGainMap` は Apple の headroom だけを持つ。ISO 21496-1 を足すときは、ここにパラメータを足してテーブル生成を一般化する（レンダラーはテーブルと最大値を受け取るだけなので変わらない）
+- 既存の高精度ソース（16bit PNG など FP16 経路）も、保存時は 8bit に落ちている。これにも保存時の確認を出すかは未決
+
+**参考にした他実装:** Skia（`SkXmp.cpp` の `getGainmapInfoApple`、`SkGainmapShader.cpp`）、Ultra HDR 仕様（Android）、libultrahdr（デコード時に `max_display_boost` を指定）、HDRImageViewer（libheif でゲインマップを取り出し、D2D の ArithmeticComposite で合成したあと HDR トーンマップ効果で表示先に合わせる。Apple 形式の扱いはソースのコメントどおり経験則）。
+
+**対象外と確認したもの:** Xperia（XQ-CQ44）の JPEG は、ゲインマップ関連の XMP・MPF・ISO 21496-1 の記述がない通常の sRGB JPEG だった（2026-09 の 2 枚で確認）。同機の DNG は Microsoft Raw Image Decoder が 24bpp RGB で出力するため、SDR 経路で表示される。RAW を HDR として見せるのは RAW 現像の領域で、本件とは別。
 
 ### 画像の大サイズ対応
 
@@ -317,7 +376,7 @@ END
 - フレームワーク: Catch2 v3。vcpkg の manifest feature `tests` に置き、既定の依存には含めない。配布ビルド（`cmake --preset release`）の内容とビルド時間は一切変わらない
 - テスト実行ファイルは `framework.h` を include するヘッダをリンクできない（`_Module` の実体を要求するため）。したがって**テストしたいロジックは WTL 非依存のモジュールに切り出す**。この制約がモジュール分割の指針になる
 - CI: 既存の release ジョブは変更しない。feature を有効にした別ジョブで `ctest` を走らせる
-- 当面の対象: パス比較・正規化（`PathCompare`）、拡張子と保存フォーマットの対応（`ImageFormatId`）、WIC の拡張子リストの分割、表示レイアウト計算（`ViewLayout`）
+- 当面の対象: パス比較・正規化（`PathCompare`）、拡張子と保存フォーマットの対応（`ImageFormatId`）、WIC の拡張子リストの分割、表示レイアウト計算（`ViewLayout`）、ゲインマップの重みとテーブル（`GainMapMath`）、ICC の原色から sRGB への行列（`IccProfile`）
 - 関連付けの ProgID（`chirami.AssocFile.JPG` 形式）は既存ユーザーのレジストリに残っているため、生成規則を変えないことをテストで固定する。変えると既に登録済みの関連付けが孤児になる
 - テストの入力には、漢字・空白・全角英字・長いパス・末尾のドットやスペース・UNC を含める。これらで壊れないことがファイル名を扱うコードの要件である
 
@@ -367,3 +426,4 @@ END
     - exe パスの取得を `AppPaths` に集約し、固定長バッファ（`MAX_PATH` 前提）を撤去。レジストリ文字列の読み出しも長さ非依存に
     - 拡張子 ⇄ 保存フォーマット ⇄ 保存ダイアログのフィルター番号を `ImageFormatId` の 1 つの表に統合。関連付けの ProgID 生成規則はテストで文字列単位に固定し、既存ユーザーの登録が孤児にならないようにした
     - 「名前を付けて保存」の既定値を開いている画像そのものに変更（「UI 仕様 > ファイル操作」参照）
+26. HDR ゲインマップ対応（iPhone HEIC）（完了。WIC のフレームチェーンでゲインマップを取り出し、Skia 方式の重みで描画時に GPU で合成する。ベースの Display P3 は sRGB に変換。保存は確認のうえ SDR。詳細はアーキテクチャ方針 >「HDR ゲインマップ」参照）

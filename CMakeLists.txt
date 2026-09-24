@@ -21,6 +21,8 @@ find_path(WTL_INCLUDE_DIR atlapp.h REQUIRED)
 add_executable(chirami WIN32
     src/main.cpp
     src/AppPaths.cpp
+    src/GainMapMath.cpp
+    src/IccProfile.cpp
     src/ImageFormatId.cpp
     src/PathCompare.cpp
     src/ProgIds.cpp
@@ -63,6 +65,7 @@ target_link_libraries(chirami PRIVATE
     d2d1
     d3d11
     dwmapi
+    dxgi
     dxguid
     dwrite
     windowscodecs

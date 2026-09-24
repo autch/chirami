@@ -2,8 +2,12 @@
 #include "FileIo.h"
 #include "TurboJpeg.h"
 
+#include "IccProfile.h"
+
 #include <shlwapi.h>  // SHCreateMemStream
 
+#include <cmath>
+#include <cstdlib>
 #include <utility>
 
 namespace
@@ -58,6 +62,126 @@ bool IsHighPrecisionFormat(IWICImagingFactory* /*factory*/, const WICPixelFormat
     }
     return false;
 }
+
+// XMP property Apple writes on the gain map: the HDR rendition's peak over
+// SDR white, as a linear ratio.
+constexpr wchar_t kAppleHeadroomQuery[] =
+    L"/xmp/http\\:\\/\\/ns.apple.com\\/HDRGainMap\\/1.0\\/:HDRGainMapHeadroom";
+
+float ReadAppleHeadroom(IWICBitmapFrameDecode* frame)
+{
+    wil::com_ptr<IWICMetadataQueryReader> reader;
+    if (FAILED(frame->GetMetadataQueryReader(reader.put())))
+    {
+        return 0.0f;
+    }
+    wil::unique_prop_variant value;
+    if (FAILED(reader->GetMetadataByName(kAppleHeadroomQuery, &value)))
+    {
+        return 0.0f;
+    }
+    switch (value.vt)
+    {
+    case VT_LPWSTR:
+        return std::wcstof(value.pwszVal, nullptr);
+    case VT_LPSTR:
+        return std::strtof(value.pszVal, nullptr);
+    case VT_R4:
+        return value.fltVal;
+    case VT_R8:
+        return static_cast<float>(value.dblVal);
+    default:
+        return 0.0f;
+    }
+}
+
+HRESULT DecodeToBgra8(IWICImagingFactory* factory, IWICBitmapSource* source, PixelBuffer& out)
+{
+    wil::com_ptr<IWICFormatConverter> converter;
+    RETURN_IF_FAILED(factory->CreateFormatConverter(converter.put()));
+    RETURN_IF_FAILED(converter->Initialize(source, GUID_WICPixelFormat32bppPBGRA,
+                                           WICBitmapDitherTypeNone, nullptr, 0.0,
+                                           WICBitmapPaletteTypeCustom));
+    UINT width = 0;
+    UINT height = 0;
+    RETURN_IF_FAILED(converter->GetSize(&width, &height));
+    RETURN_HR_IF(WINCODEC_ERR_BADIMAGE, width == 0 || height == 0);
+    const uint64_t stride64 = uint64_t{width} * 4;
+    RETURN_HR_IF(kHrImageTooLarge, stride64 * height > kMaxPixelBytes);
+
+    out.format = PixelBuffer::Format::Bgra8;
+    out.width = width;
+    out.height = height;
+    out.stride = static_cast<uint32_t>(stride64);
+    out.pixels.resize(static_cast<size_t>(stride64 * height));
+    return converter->CopyPixels(nullptr, out.stride, static_cast<UINT>(out.pixels.size()),
+                                 out.pixels.data());
+}
+
+// The base image's primaries as a matrix to sRGB, when its ICC profile is a
+// simple one on the sRGB curve (Display P3 on iPhones).
+std::optional<ColorMatrix3> ReadToSrgbMatrix(IWICImagingFactory* factory,
+                                             IWICBitmapFrameDecode* frame)
+{
+    wil::com_ptr<IWICColorContext> context;
+    if (FAILED(factory->CreateColorContext(context.put())))
+    {
+        return std::nullopt;
+    }
+    IWICColorContext* contexts[] = {context.get()};
+    UINT count = 0;
+    WICColorContextType type{};
+    UINT size = 0;
+    if (FAILED(frame->GetColorContexts(1, contexts, &count)) || count == 0
+        || FAILED(context->GetType(&type)) || type != WICColorContextProfile
+        || FAILED(context->GetProfileBytes(0, nullptr, &size)) || size == 0)
+    {
+        return std::nullopt;
+    }
+    std::vector<uint8_t> profile(size);
+    if (FAILED(context->GetProfileBytes(size, profile.data(), &size)))
+    {
+        return std::nullopt;
+    }
+    profile.resize(size);
+    return SrgbCurveProfileToSrgbMatrix(profile);
+}
+
+// Attaches Apple's HDR gain map (iPhone HEIC) when the codec exposes one
+// through a gain-map frame chain. Codecs or HEIF extensions without that
+// support, or a map without its headroom, leave the image SDR exactly as
+// before. See DESIGN.md, "HDR gain map".
+void TryAttachGainMap(IWICImagingFactory* factory, IWICBitmapFrameDecode* frame,
+                      LoadedImage& out) noexcept
+try
+{
+    const auto chain = wil::try_com_query<IWICBitmapFrameChainReader>(frame);
+    UINT count = 0;
+    if (!chain || FAILED(chain->GetChainedFrameCount(WICBitmapChainType_GainMap, &count))
+        || count == 0)
+    {
+        return;
+    }
+    wil::com_ptr<IWICBitmapFrameDecode> gainFrame;
+    THROW_IF_FAILED(chain->GetChainedFrame(WICBitmapChainType_GainMap, 0, gainFrame.put()));
+
+    float headroom = ReadAppleHeadroom(gainFrame.get());
+    if (!(headroom > 1.0f))
+    {
+        headroom = ReadAppleHeadroom(frame);
+    }
+    if (!(headroom > 1.0f) || !std::isfinite(headroom))
+    {
+        return;  // not Apple's format, or nothing to gain
+    }
+
+    HdrGainMap gainMap;
+    THROW_IF_FAILED(DecodeToBgra8(factory, gainFrame.get(), gainMap.map));
+    gainMap.headroom = headroom;
+    out.gainMap = std::move(gainMap);
+    out.toSrgb = ReadToSrgbMatrix(factory, frame);
+}
+CATCH_LOG()
 
 }  // namespace
 
@@ -259,6 +383,12 @@ try
     RETURN_IF_FAILED(converter->CopyPixels(nullptr, out.stride,
                                            static_cast<UINT>(out.pixels.size()),
                                            out.pixels.data()));
+
+    // Gain maps lift an SDR base; high-precision sources carry their own range.
+    if (out.format == LoadedImage::Format::Bgra8)
+    {
+        TryAttachGainMap(factory, frame.get(), out);
+    }
     return S_OK;
 }
 CATCH_RETURN()

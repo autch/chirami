@@ -26,9 +26,12 @@ public:
     // returned as-is so the caller can DiscardDevice.
     HRESULT Resize(UINT width, UINT height);
 
-    // Queries DISPLAYCONFIG_SDR_WHITE_LEVEL for the monitor hwnd sits on.
-    // Returns true when the boost changed (the caller should repaint).
-    bool UpdateSdrWhiteLevel();
+    // Queries the SDR white level (DISPLAYCONFIG_SDR_WHITE_LEVEL) and the
+    // HDR headroom (DXGI_OUTPUT_DESC1) of the monitor hwnd sits on. Returns
+    // true when either changed (the caller should repaint). The headroom is
+    // re-read only when the monitor changes or `displayChanged` is set, as
+    // this runs on every WM_MOVE.
+    bool UpdateDisplayLevels(bool displayChanged = false);
 
     void ClearTiles();
     bool HasTiles() const { return !m_tiles.empty(); }
@@ -67,7 +70,17 @@ private:
         D2D1_RECT_F source{};      // image region this tile displays
         D2D1_RECT_F withGutter{};  // image region the bitmap actually holds
         wil::com_ptr<ID2D1Bitmap> bitmap;
+
+        // Gain-map images only: bitmap * table(gain map) -> color matrix,
+        // drawn instead of the bare bitmap. See DESIGN.md, "HDR gain map".
+        wil::com_ptr<ID2D1Effect> gainTable;    // TableTransfer: gain -> boost
+        wil::com_ptr<ID2D1Effect> colorMatrix;  // rescale + base primaries to sRGB
     };
+
+    float QuerySdrBoost() const;
+    float QueryDisplayHeadroom() const;
+    HRESULT CreateGainEffects(ImageTile& tile, const LoadedImage& image);
+    void UpdateGainEffects();
 
     HWND m_hwnd = nullptr;
     ID2D1Factory1* m_factory = nullptr;  // not owned; window lifetime
@@ -83,10 +96,20 @@ private:
     wil::com_ptr<ID2D1SolidColorBrush> m_textBrush;
     std::vector<ImageTile> m_tiles;
 
+    // The uploaded image's gain map, shared by every tile's effect graph.
+    wil::com_ptr<ID2D1Bitmap> m_gainBitmap;
+    float m_contentHeadroom = 1.0f;
+    ColorMatrix3 m_toSrgb{1, 0, 0, 0, 1, 0, 0, 0, 1};
+
     // With HDR (advanced color) enabled, DWM boosts ordinary SDR windows to
     // the user's SDR white level but composes scRGB surfaces at 1.0 == 80
     // nits. Scaling the whole scene by this factor keeps chirami's SDR
     // brightness in line with every other window; HDR pixels get the same
     // headroom above it. 1.0 on SDR displays.
     float m_sdrBoost = 1.0f;
+
+    // The display's peak luminance over its SDR white: how much of a gain
+    // map it can show. 1.0 on SDR displays or with HDR off.
+    float m_displayHeadroom = 1.0f;
+    HMONITOR m_headroomMonitor = nullptr;  // monitor m_displayHeadroom was read for
 };
