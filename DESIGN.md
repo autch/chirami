@@ -45,6 +45,44 @@ libjpeg-turbo は導入済み（詳細はロードマップ Phase 4 ステップ
 - なければ・失敗すれば WIC にフォールバック
 - DLL 同梱 + 実行時動的ロード（フルパス LoadLibrary）。リンクはしない
 
+### EXIF の Orientation（設計決定 2026-09、実装済み — Phase 4 ステップ 27）
+
+カメラを縦に構えて撮った JPEG は、画素を横長のまま格納し、EXIF の Orientation（タグ 274）で表示の向きを指定する。chirami はこれを見ておらず、横倒しで表示していた（例: iPhone 15 Pro の JPEG、4032×3024、Orientation = 6。エクスプローラーのサムネイルは縦長）。意図的に見ないと決めた経緯はなく、単に未実装だった。
+
+**Microsoft Learn で確認したこと:**
+
+- WIC の `System.Photo.Orientation` ポリシーが対応するコンテナは **JPEG と TIFF** だけ。JPEG は `/app1/ifd/{ushort=274}` → `/xmp/tiff:Orientation`、TIFF は `/ifd/{ushort=274}` → `/ifd/xmp/tiff:Orientation` の順に読む
+- プロパティの説明は「アプリとシェルが正しい向きで表示するための値」で、デコーダが画素を回すとはどこにも書かれていない。適用はアプリ側の仕事（`IWICBitmapFlipRotator` は反転が先、回転が後）
+- 値の名前に注意。Microsoft の定義では 6 が `PHOTO_ORIENTATION_ROTATE270`、8 が `ROTATE90` で、EXIF の意味（6 は時計回り 90° で正立）と逆向きに読める。対応表は名前ではなく実画像で確かめる
+
+**手元で確認したこと:**
+
+- HEIC は WIC のデコーダがコンテナの回転指定（`irot`）を適用済み。a.heic は格納 4032×3024 + `irot` = 3 で、WIC は 3024×4032 を返し、ゲインマップも同じ向きで返る。HEIF の EXIF Orientation はコンテナの指定と重複しうるので、**HEIF に EXIF の Orientation を適用すると二重回転になる**
+- libjpeg-turbo の経路も WIC の JPEG デコーダも、向きを適用しない
+- 上記 iPhone の JPEG の EXIF はビッグエンディアン（`MM`）。XMP に `tiff:Orientation` は無い
+- Xperia（XQ-CQ44）の手元の 2 枚は Orientation = 1
+
+**決定事項:**
+
+- **対象は JPEG と TIFF。** WIC のポリシーと同じ範囲。HEIF / AVIF はデコーダが適用済みなので触らない。PNG（eXIf）、WebP、JPEG XR、RAW は当面対象外とし、実例が出てきたら検討する
+- **JPEG は自前のパーサで読む。** APP1 の EXIF から IFD0 のタグ 274 だけを読む小さな WTL 非依存モジュールにし、両バイトオーダーと壊れたデータをユニットテストする。libjpeg-turbo の経路には WIC のデコーダが無く、向きのためだけに WIC を起動するより軽い。XMP だけに Orientation がある JPEG は稀なので読まない。TIFF は WIC の `System.Photo.Orientation` で読む
+- **デコード直後にワーカースレッドで画素に焼き込む。** 既存の回転・反転処理を再利用する。表示・編集・先読みキャッシュはそのまま動き、保存時は EXIF を書き出さないので、見た目どおりの向きで保存される（将来メタデータを引き継ぐ保存を入れるなら、Orientation を 1 に書き換える必要がある）
+- **ON/OFF の設定は付けない。** 主要なビューアは既定で適用する
+- **適用したことはプロパティウィンドウで分かるようにする。** 「画像」グループに「向き」の行を足し、適用したときだけ「EXIF の Orientation (6) に従い、時計回りに 90° 回転して表示」のように出す（値 1 やタグ無しでは出さない）。「表示形式」と同じく、ファイルの情報ではなく読み込み結果（`LoadedImage`）から作る。文言は値ごとに STRINGTABLE（日英）。「ピクセルサイズ」はファイルに格納されたままの寸法なので、表示が縦長なのと食い違う理由がこの行で分かる
+
+**実装:**
+
+- `ExifOrientation`（WTL 非依存）: `ReadJpegExifOrientation` は SOI から順にマーカーをたどり、SOS より前の APP1 `Exif\0\0` の IFD0 からタグ 274（SHORT、個数 1、値 1〜8）を読む。無い・壊れている・範囲外はすべて 1。`StepsForOrientation` は値を「左右反転・上下反転・時計回りの 90° 回転数」に直す（反転が先）。180° は 2 つの反転で表し、90° の回転は 1 回で済むようにしている
+- `ImageLoader::Decode` は、デコード前のバイト列から JPEG の Orientation を読み、libjpeg-turbo と WIC のどちらでデコードしても同じ値を適用する。TIFF はデコード後にフレームの `System.Photo.Orientation` を読む。適用は既存の `FlipImage*` / `RotateImage90` で、ゲインマップがあればそれも一緒に回る。アニメーション（複数フレーム）の経路には適用しない
+- `LoadedImage::appliedOrientation` に適用した値を残し、プロパティウィンドウの「向き」の行はここから作る（`MainWindow::ViewerImageItems`。「表示形式」と一緒に画像グループの末尾へ入れる）。文言は `IDS_ORIENTATION_2`〜`8`
+- 編集（回転・クロップなど）の後も `appliedOrientation` は引き継ぐ。「読み込み時にファイルの指定で回した」ことの記録なので
+
+**検証（2026-09）:**
+
+- Orientation 1〜8 を付けた JPEG と TIFF を合成し（正しく表示されると左上から赤・緑・青・黄の横長になるよう、正解画像に逆変換を掛けて格納。Pillow の `exif_transpose` で元に戻ることを確認済み）、chirami で表示して画面から判定した。JPEG は libjpeg-turbo 経由・WIC 経由（turbojpeg.dll を外して確認）とも、TIFF も、8 通りすべて正しい
+- iPhone の JPEG（Orientation = 6、ビッグエンディアン）は縦長で正立。プロパティに「EXIF の Orientation (6) に従い、時計回りに 90° 回転して表示」が出て、「ピクセルサイズ」は格納時の寸法のまま
+- HEIC（`irot` = 3）は二重に回らず、HDR の明るさも変わらない
+
 ### レンダリング
 
 **基本構成: WIC → Direct2D（HDR 対応済み）**
@@ -230,6 +268,7 @@ IrfanView の Image Properties に相当するが、フォーマットごとに�
 - クリップボード由来・編集後の画像はファイルが無いため、寸法・ピクセル形式などの基本情報のみ表示
 - 「ピクセル形式」はデコード前のネイティブ形式（IWICBitmapFrameDecode::GetPixelFormat。GIF なら 8bpp Indexed）。アニメーション画像は先読みキャッシュ除外のため表示側の識別パス（m_displayedPath）が空になるが、メタデータ用の識別（m_metadataPath）は別に保持し、再生中もファイルのメタデータを表示し続ける
 - 「表示形式」はビューアが実際に保持・描画しているバッファ形式（32bpp BGRA (SDR) / 64bpp RGBA half float (scRGB / HDR)）。ネイティブ形式と併記することで、その画像がどの描画経路（SDR か FP16 scRGB か）を通っているかが分かる。値は UI スレッドの LoadedImage::format から取り、ワーカーの結果に画像グループ末尾として挿入する
+- 「向き」は、読み込み時に EXIF の Orientation を適用したときだけ出す（アーキテクチャ方針 >「EXIF の Orientation」参照）
 - ウィンドウ位置・サイズはセッション中のみ記憶（INI には保存しない）
 
 ### 編集（優先度低）
@@ -376,7 +415,7 @@ END
 - フレームワーク: Catch2 v3。vcpkg の manifest feature `tests` に置き、既定の依存には含めない。配布ビルド（`cmake --preset release`）の内容とビルド時間は一切変わらない
 - テスト実行ファイルは `framework.h` を include するヘッダをリンクできない（`_Module` の実体を要求するため）。したがって**テストしたいロジックは WTL 非依存のモジュールに切り出す**。この制約がモジュール分割の指針になる
 - CI: 既存の release ジョブは変更しない。feature を有効にした別ジョブで `ctest` を走らせる
-- 当面の対象: パス比較・正規化（`PathCompare`）、拡張子と保存フォーマットの対応（`ImageFormatId`）、WIC の拡張子リストの分割、表示レイアウト計算（`ViewLayout`）、ゲインマップの重みとテーブル（`GainMapMath`）、ICC の原色から sRGB への行列（`IccProfile`）
+- 当面の対象: パス比較・正規化（`PathCompare`）、拡張子と保存フォーマットの対応（`ImageFormatId`）、WIC の拡張子リストの分割、表示レイアウト計算（`ViewLayout`）、ゲインマップの重みとテーブル（`GainMapMath`）、ICC の原色から sRGB への行列（`IccProfile`）、JPEG の EXIF Orientation の読み取りと回転・反転への対応（`ExifOrientation`）
 - 関連付けの ProgID（`chirami.AssocFile.JPG` 形式）は既存ユーザーのレジストリに残っているため、生成規則を変えないことをテストで固定する。変えると既に登録済みの関連付けが孤児になる
 - テストの入力には、漢字・空白・全角英字・長いパス・末尾のドットやスペース・UNC を含める。これらで壊れないことがファイル名を扱うコードの要件である
 
@@ -427,3 +466,4 @@ END
     - 拡張子 ⇄ 保存フォーマット ⇄ 保存ダイアログのフィルター番号を `ImageFormatId` の 1 つの表に統合。関連付けの ProgID 生成規則はテストで文字列単位に固定し、既存ユーザーの登録が孤児にならないようにした
     - 「名前を付けて保存」の既定値を開いている画像そのものに変更（「UI 仕様 > ファイル操作」参照）
 26. HDR ゲインマップ対応（iPhone HEIC）（完了。WIC のフレームチェーンでゲインマップを取り出し、Skia 方式の重みで描画時に GPU で合成する。ベースの Display P3 は sRGB に変換。保存は確認のうえ SDR。詳細はアーキテクチャ方針 >「HDR ゲインマップ」参照）
+27. EXIF の Orientation の適用（完了。JPEG と TIFF が対象、読み込み時に画素へ焼き込み、プロパティに「向き」を表示。JPEG は自前の EXIF パーサで読むので libjpeg-turbo の経路でも効く。詳細はアーキテクチャ方針 >「EXIF の Orientation」参照）

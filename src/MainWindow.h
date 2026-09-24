@@ -257,7 +257,7 @@ private:
 
     void TogglePropertiesWindow();
     void RequestMetadataForCurrent();
-    MetadataItem DisplayFormatItem() const;
+    std::vector<MetadataItem> ViewerImageItems() const;
     std::vector<MetadataItem> BuildBasicMetadataItems() const;
     LRESULT OnMetadataDone(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnRepaintFrame(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);

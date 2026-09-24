@@ -53,6 +53,15 @@
 #define IDS_META_DISPLAYFORMAT  148
 #define IDS_DEBUG_MARK          149
 #define IDS_CONFIRM_SAVE_SDR    150
+#define IDS_META_ORIENTATION    151
+// 152..158: IDS_ORIENTATION_2..8, one per EXIF Orientation value
+#define IDS_ORIENTATION_2       152
+#define IDS_ORIENTATION_3       153
+#define IDS_ORIENTATION_4       154
+#define IDS_ORIENTATION_5       155
+#define IDS_ORIENTATION_6       156
+#define IDS_ORIENTATION_7       157
+#define IDS_ORIENTATION_8       158
 
 #define IDR_MAINMENU            200
 

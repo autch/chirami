@@ -21,6 +21,7 @@ find_path(WTL_INCLUDE_DIR atlapp.h REQUIRED)
 add_executable(chirami WIN32
     src/main.cpp
     src/AppPaths.cpp
+    src/ExifOrientation.cpp
     src/GainMapMath.cpp
     src/IccProfile.cpp
     src/ImageFormatId.cpp

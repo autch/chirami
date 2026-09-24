@@ -166,13 +166,14 @@ uint32_t ScaledMapLength(uint32_t mapSize, uint32_t baseSize, uint32_t newBaseSi
 }
 
 // Copies everything but the pixels, so the result keeps its gain map
-// headroom and color conversion.
+// headroom, color conversion and load-time orientation note.
 LoadedImage WithPixels(const LoadedImage& source, PixelBuffer pixels)
 {
     LoadedImage result;
     static_cast<PixelBuffer&>(result) = std::move(pixels);
     result.gainMap.headroom = source.gainMap.headroom;
     result.toSrgb = source.toSrgb;
+    result.appliedOrientation = source.appliedOrientation;
     return result;
 }
 

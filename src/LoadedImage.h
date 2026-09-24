@@ -69,6 +69,9 @@ struct LoadedImage : PixelBuffer
     // Set only for gain-map images, whose base is Display P3 rather than
     // sRGB. Other images are drawn without gamut conversion as before.
     std::optional<ColorMatrix3> toSrgb;
+    // The EXIF Orientation (2..8) the loader baked into the pixels, or 1 if
+    // it turned nothing. Shown in the properties window.
+    uint16_t appliedOrientation = 1;
 
     // Bytes held, for cache accounting.
     size_t TotalBytes() const { return pixels.size() + gainMap.map.pixels.size(); }

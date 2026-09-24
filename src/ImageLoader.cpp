@@ -2,7 +2,9 @@
 #include "FileIo.h"
 #include "TurboJpeg.h"
 
+#include "ExifOrientation.h"
 #include "IccProfile.h"
+#include "ImageTransform.h"
 
 #include <shlwapi.h>  // SHCreateMemStream
 
@@ -183,6 +185,45 @@ try
 }
 CATCH_LOG()
 
+// TIFF's Orientation through WIC's photo metadata policy (EXIF, then XMP).
+uint16_t ReadTiffOrientation(IWICBitmapFrameDecode* frame)
+{
+    wil::com_ptr<IWICMetadataQueryReader> reader;
+    wil::unique_prop_variant value;
+    if (FAILED(frame->GetMetadataQueryReader(reader.put()))
+        || FAILED(reader->GetMetadataByName(L"System.Photo.Orientation", &value))
+        || value.vt != VT_UI2 || value.uiVal < 1 || value.uiVal > 8)
+    {
+        return 1;
+    }
+    return value.uiVal;
+}
+
+// Bakes an EXIF Orientation into the pixels (and any gain map), so display,
+// editing, the cache and saving all see the upright image. See DESIGN.md,
+// "EXIF Orientation".
+void ApplyOrientation(LoadedImage& image, uint16_t orientation)
+{
+    const OrientationSteps steps = StepsForOrientation(orientation);
+    if (steps.IsIdentity())
+    {
+        return;
+    }
+    if (steps.flipHorizontal)
+    {
+        FlipImageHorizontal(image);
+    }
+    if (steps.flipVertical)
+    {
+        FlipImageVertical(image);
+    }
+    if (steps.quarterTurnsClockwise != 0)
+    {
+        image = RotateImage90(image, steps.quarterTurnsClockwise == 1);
+    }
+    image.appliedOrientation = orientation;
+}
+
 }  // namespace
 
 ImageLoader::ImageLoader(HWND notifyWindow, UINT notifyMessage)
@@ -312,11 +353,19 @@ try
             ReadFileChunked(file.get(), data, [&] { return ShouldAbort(stopToken); }));
     }
 
+    // Neither decoder applies the EXIF Orientation; JPEG's is read here,
+    // from the bytes, because the libjpeg-turbo path has no WIC decoder.
+    // HEIF needs nothing: its decoder already applies the container's
+    // rotation, and applying EXIF on top would turn the image twice.
+    const bool isJpeg = TurboJpeg::LooksLikeJpeg(data.data(), data.size());
+    const uint16_t jpegOrientation = isJpeg ? ReadJpegExifOrientation(data) : 1;
+
     // JPEG goes through the optional libjpeg-turbo codec when its DLL is
     // present; any failure there (CMYK, corrupt stream) falls back to WIC.
-    if (TurboJpeg::LooksLikeJpeg(data.data(), data.size()) && TurboJpeg::IsAvailable()
+    if (isJpeg && TurboJpeg::IsAvailable()
         && SUCCEEDED(TurboJpeg::Decode(data.data(), data.size(), out)))
     {
+        ApplyOrientation(out, jpegOrientation);
         return S_OK;
     }
 
@@ -389,6 +438,12 @@ try
     {
         TryAttachGainMap(factory, frame.get(), out);
     }
+
+    GUID container{};
+    (void)decoder->GetContainerFormat(&container);
+    ApplyOrientation(out, isJpeg                                     ? jpegOrientation
+                          : container == GUID_ContainerFormatTiff ? ReadTiffOrientation(frame.get())
+                                                                  : 1);
     return S_OK;
 }
 CATCH_RETURN()

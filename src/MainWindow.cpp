@@ -1240,12 +1240,14 @@ void MainWindow::RequestMetadataForCurrent()
     m_metadataWindow.SetItems(BuildBasicMetadataItems());
 }
 
-// What the viewer actually decoded into and renders from: 8-bit SDR, FP16
-// scRGB for high-precision/HDR sources, or 8-bit SDR lifted by a gain map.
-// Useful alongside the file's native pixel format to see which rendering
-// path an image takes.
-MetadataItem MainWindow::DisplayFormatItem() const
+// What the viewer did with the image, as opposed to what the file says:
+// the buffer it decoded into and renders from (8-bit SDR, FP16 scRGB for
+// high-precision/HDR sources, or 8-bit SDR lifted by a gain map), and the
+// EXIF Orientation it baked in, if any. The latter explains why the file's
+// pixel size reads sideways.
+std::vector<MetadataItem> MainWindow::ViewerImageItems() const
 {
+    std::vector<MetadataItem> items;
     std::wstring format;
     if (m_cpuImage.format == LoadedImage::Format::Rgba16F)
     {
@@ -1261,7 +1263,16 @@ MetadataItem MainWindow::DisplayFormatItem() const
     {
         format = L"32bpp BGRA (SDR)";
     }
-    return {MetadataGroup::Image, LoadStringResource(IDS_META_DISPLAYFORMAT), std::move(format)};
+    items.push_back(
+        {MetadataGroup::Image, LoadStringResource(IDS_META_DISPLAYFORMAT), std::move(format)});
+
+    if (const uint16_t orientation = m_cpuImage.appliedOrientation;
+        orientation >= 2 && orientation <= 8)
+    {
+        items.push_back({MetadataGroup::Image, LoadStringResource(IDS_META_ORIENTATION),
+                         LoadStringResource(IDS_ORIENTATION_2 + (orientation - 2))});
+    }
+    return items;
 }
 
 std::vector<MetadataItem> MainWindow::BuildBasicMetadataItems() const
@@ -1273,7 +1284,10 @@ std::vector<MetadataItem> MainWindow::BuildBasicMetadataItems() const
     }
     items.push_back({MetadataGroup::Image, LoadStringResource(IDS_META_DIMENSIONS),
                      std::format(L"{} × {}", m_cpuImage.width, m_cpuImage.height)});
-    items.push_back(DisplayFormatItem());
+    for (MetadataItem& item : ViewerImageItems())
+    {
+        items.push_back(std::move(item));
+    }
     if (m_animationFrames.size() > 1)
     {
         items.push_back({MetadataGroup::Image, LoadStringResource(IDS_META_FRAMES),
@@ -1303,8 +1317,8 @@ LRESULT MainWindow::OnMetadataDone(UINT, WPARAM, LPARAM, BOOL&)
         std::vector<MetadataItem> items = std::move(result->items);
         if (m_cpuImage)
         {
-            // The reader reports the file's native pixel format; add how the
-            // viewer actually holds it, right below the image group's rows.
+            // The reader reports what the file says; add what the viewer did
+            // with it, right below the image group's rows.
             auto position = items.end();
             for (auto it = items.begin(); it != items.end(); ++it)
             {
@@ -1313,7 +1327,9 @@ LRESULT MainWindow::OnMetadataDone(UINT, WPARAM, LPARAM, BOOL&)
                     position = std::next(it);
                 }
             }
-            items.insert(position, DisplayFormatItem());
+            auto viewerItems = ViewerImageItems();
+            items.insert(position, std::make_move_iterator(viewerItems.begin()),
+                         std::make_move_iterator(viewerItems.end()));
         }
         m_metadataWindow.SetItems(std::move(items));
     }

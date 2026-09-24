@@ -4,12 +4,14 @@
 find_package(Catch2 3 CONFIG REQUIRED)
 
 add_executable(chirami_tests
+    ExifOrientationTests.cpp
     GainMapMathTests.cpp
     IccProfileTests.cpp
     ImageFormatIdTests.cpp
     PathCompareTests.cpp
     ProgIdTests.cpp
     ViewLayoutTests.cpp
+    "${CMAKE_SOURCE_DIR}/src/ExifOrientation.cpp"
     "${CMAKE_SOURCE_DIR}/src/GainMapMath.cpp"
     "${CMAKE_SOURCE_DIR}/src/IccProfile.cpp"
     "${CMAKE_SOURCE_DIR}/src/ImageFormatId.cpp"

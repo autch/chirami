@@ -60,6 +60,14 @@ BEGIN
     IDS_META_DISPLAYFORMAT   L"表示形式"
     IDS_DEBUG_MARK           L" [DEBUG]"
     IDS_CONFIRM_SAVE_SDR     L"この画像は HDR 写真ですが、保存できるのは SDR の画像だけです（HDR の情報は失われます）。\n保存を続けますか?"
+    IDS_META_ORIENTATION     L"向き"
+    IDS_ORIENTATION_2        L"EXIF の Orientation (2) に従い、左右反転して表示"
+    IDS_ORIENTATION_3        L"EXIF の Orientation (3) に従い、180° 回転して表示"
+    IDS_ORIENTATION_4        L"EXIF の Orientation (4) に従い、上下反転して表示"
+    IDS_ORIENTATION_5        L"EXIF の Orientation (5) に従い、左右反転してから反時計回りに 90° 回転して表示"
+    IDS_ORIENTATION_6        L"EXIF の Orientation (6) に従い、時計回りに 90° 回転して表示"
+    IDS_ORIENTATION_7        L"EXIF の Orientation (7) に従い、左右反転してから時計回りに 90° 回転して表示"
+    IDS_ORIENTATION_8        L"EXIF の Orientation (8) に従い、反時計回りに 90° 回転して表示"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -195,6 +203,14 @@ BEGIN
     IDS_META_DISPLAYFORMAT   L"Display format"
     IDS_DEBUG_MARK           L" [DEBUG]"
     IDS_CONFIRM_SAVE_SDR     L"This is an HDR photo, but it can only be saved as SDR (the HDR information will be lost).\nDo you want to continue?"
+    IDS_META_ORIENTATION     L"Orientation"
+    IDS_ORIENTATION_2        L"Flipped horizontally per EXIF Orientation (2)"
+    IDS_ORIENTATION_3        L"Rotated 180° per EXIF Orientation (3)"
+    IDS_ORIENTATION_4        L"Flipped vertically per EXIF Orientation (4)"
+    IDS_ORIENTATION_5        L"Flipped horizontally, then rotated 90° counterclockwise per EXIF Orientation (5)"
+    IDS_ORIENTATION_6        L"Rotated 90° clockwise per EXIF Orientation (6)"
+    IDS_ORIENTATION_7        L"Flipped horizontally, then rotated 90° clockwise per EXIF Orientation (7)"
+    IDS_ORIENTATION_8        L"Rotated 90° counterclockwise per EXIF Orientation (8)"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
