@@ -123,6 +123,22 @@ try
     wil::com_ptr<IWICBitmapSource> converted;
     RETURN_IF_FAILED(WICConvertBitmapSource(targetFormat, source.get(), converted.put()));
 
+    // The pixels stay in the file's own color space, so its profile goes
+    // with them; without it other viewers take them as sRGB and wide-gamut
+    // photos look washed out. Best effort: an encoder without color
+    // contexts (BMP) saves the pixels alone, as before. See DESIGN.md,
+    // "Color profiles".
+    if (const auto& icc = image.colorProfile.icc; !icc.empty())
+    {
+        wil::com_ptr<IWICColorContext> context;
+        if (SUCCEEDED(factory->CreateColorContext(context.put()))
+            && SUCCEEDED(context->InitializeFromMemory(icc.data(), static_cast<UINT>(icc.size()))))
+        {
+            IWICColorContext* contexts[] = {context.get()};
+            LOG_IF_FAILED(frame->SetColorContexts(1, contexts));
+        }
+    }
+
     RETURN_IF_FAILED(frame->WriteSource(converted.get(), nullptr));
     RETURN_IF_FAILED(frame->Commit());
     RETURN_IF_FAILED(encoder->Commit());

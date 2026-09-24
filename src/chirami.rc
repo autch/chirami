@@ -68,6 +68,11 @@ BEGIN
     IDS_ORIENTATION_6        L"EXIF の Orientation (6) に従い、時計回りに 90° 回転して表示"
     IDS_ORIENTATION_7        L"EXIF の Orientation (7) に従い、左右反転してから時計回りに 90° 回転して表示"
     IDS_ORIENTATION_8        L"EXIF の Orientation (8) に従い、反時計回りに 90° 回転して表示"
+    IDS_META_COLORPROFILE    L"カラープロファイル"
+    IDS_COLORPROFILE_CONVERTED L"{}（色を変換して表示）"
+    IDS_COLORPROFILE_NOTNEEDED L"{}（sRGB 相当のため変換なし）"
+    IDS_COLORPROFILE_UNSUPPORTED L"{}（未対応のため変換なし）"
+    IDS_COLORPROFILE_UNNAMED L"名前なし"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78
@@ -211,6 +216,11 @@ BEGIN
     IDS_ORIENTATION_6        L"Rotated 90° clockwise per EXIF Orientation (6)"
     IDS_ORIENTATION_7        L"Flipped horizontally, then rotated 90° clockwise per EXIF Orientation (7)"
     IDS_ORIENTATION_8        L"Rotated 90° counterclockwise per EXIF Orientation (8)"
+    IDS_META_COLORPROFILE    L"Color profile"
+    IDS_COLORPROFILE_CONVERTED L"{} (colors converted for display)"
+    IDS_COLORPROFILE_NOTNEEDED L"{} (sRGB equivalent, not converted)"
+    IDS_COLORPROFILE_UNSUPPORTED L"{} (not converted: unsupported)"
+    IDS_COLORPROFILE_UNNAMED L"unnamed"
 END
 
 IDD_RESIZE DIALOGEX 0, 0, 216, 78

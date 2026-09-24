@@ -1242,9 +1242,10 @@ void MainWindow::RequestMetadataForCurrent()
 
 // What the viewer did with the image, as opposed to what the file says:
 // the buffer it decoded into and renders from (8-bit SDR, FP16 scRGB for
-// high-precision/HDR sources, or 8-bit SDR lifted by a gain map), and the
-// EXIF Orientation it baked in, if any. The latter explains why the file's
-// pixel size reads sideways.
+// high-precision/HDR sources, or 8-bit SDR lifted by a gain map), the
+// EXIF Orientation it baked in, if any (which explains why the file's
+// pixel size reads sideways), and what it did with an embedded color
+// profile.
 std::vector<MetadataItem> MainWindow::ViewerImageItems() const
 {
     std::vector<MetadataItem> items;
@@ -1271,6 +1272,20 @@ std::vector<MetadataItem> MainWindow::ViewerImageItems() const
     {
         items.push_back({MetadataGroup::Image, LoadStringResource(IDS_META_ORIENTATION),
                          LoadStringResource(IDS_ORIENTATION_2 + (orientation - 2))});
+    }
+
+    if (const ColorProfile& profile = m_cpuImage.colorProfile;
+        profile.handling != ColorProfile::Handling::None)
+    {
+        const UINT formatId =
+            profile.handling == ColorProfile::Handling::Converted   ? IDS_COLORPROFILE_CONVERTED
+            : profile.handling == ColorProfile::Handling::NotNeeded ? IDS_COLORPROFILE_NOTNEEDED
+                                                                    : IDS_COLORPROFILE_UNSUPPORTED;
+        const std::wstring name = profile.description.empty()
+                                      ? LoadStringResource(IDS_COLORPROFILE_UNNAMED)
+                                      : profile.description;
+        items.push_back({MetadataGroup::Image, LoadStringResource(IDS_META_COLORPROFILE),
+                         std::vformat(LoadStringResource(formatId), std::make_wformat_args(name))});
     }
     return items;
 }

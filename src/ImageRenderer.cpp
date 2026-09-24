@@ -103,11 +103,24 @@ HRESULT ImageRenderer::EnsureDevice()
         wil::com_ptr<ID2D1Effect> whiteLevel;
         RETURN_IF_FAILED(context->CreateEffect(CLSID_D2D1ColorMatrix, whiteLevel.put()));
 
+        wil::com_ptr<ID2D1ColorContext> scRgb;
+        RETURN_IF_FAILED(
+            context->CreateColorContext(D2D1_COLOR_SPACE_SCRGB, nullptr, 0, scRgb.put()));
+        // BEST keeps the extended range (wide-gamut colors land outside
+        // 0..1 in scRGB instead of being clipped); it needs feature level
+        // 10_0 and float buffers, and fails at draw time without them.
+        m_colorQuality =
+            device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_10_0
+                    && context->IsBufferPrecisionSupported(D2D1_BUFFER_PRECISION_32BPC_FLOAT)
+                ? D2D1_COLORMANAGEMENT_QUALITY_BEST
+                : D2D1_COLORMANAGEMENT_QUALITY_NORMAL;
+
         m_d3dDevice = std::move(device);
         m_swapChain = std::move(swapChain);
         m_d2dDevice = std::move(d2dDevice);
         m_d2dContext = std::move(context);
         m_whiteLevelEffect = std::move(whiteLevel);
+        m_scRgbContext = std::move(scRgb);
         (void)UpdateDisplayLevels(true);
     }
     if (!m_targetBitmap)
@@ -303,6 +316,7 @@ void ImageRenderer::DiscardDevice()
         m_d2dContext->SetTarget(nullptr);
     }
     m_whiteLevelEffect.reset();
+    m_scRgbContext.reset();
     m_sceneBitmap.reset();
     m_targetBitmap.reset();
     m_d2dContext.reset();
@@ -326,14 +340,33 @@ HRESULT ImageRenderer::UploadImage(const LoadedImage& image)
     const uint32_t tileEdge = std::min(m_d2dContext->GetMaximumBitmapSize(), 8192u);
     RETURN_HR_IF(kHrImageTooLarge, tileEdge == 0);
 
+    // An embedded profile that Direct2D takes for plain sRGB needs nothing
+    // more; any other goes through color management to scRGB.
+    wil::com_ptr<ID2D1ColorContext> sourceProfile;
+    const ColorProfile& profile = image.colorProfile;
+    if (profile.handling == ColorProfile::Handling::Converted && !profile.icc.empty())
+    {
+        const HRESULT hr = m_d2dContext->CreateColorContext(
+            D2D1_COLOR_SPACE_CUSTOM, profile.icc.data(), static_cast<UINT32>(profile.icc.size()),
+            sourceProfile.put());
+        if (FAILED(hr) || sourceProfile->GetColorSpace() == D2D1_COLOR_SPACE_SRGB)
+        {
+            LOG_IF_FAILED(hr);
+            sourceProfile.reset();  // draw as sRGB, as before
+        }
+    }
+
     // SDR tiles use _SRGB so the hardware linearizes the 8-bit pixels when
     // sampling - exactly the conversion the linear-gamma (scRGB) target
-    // needs. HDR tiles are half floats already in scRGB.
+    // needs. With a profile the tiles stay encoded (UNORM): the color
+    // management effect applies the profile's own tone curve. HDR tiles
+    // are half floats already in scRGB.
     const bool halfFloat = image.format == LoadedImage::Format::Rgba16F;
-    const auto properties = D2D1::BitmapProperties(
-        D2D1::PixelFormat(halfFloat ? DXGI_FORMAT_R16G16B16A16_FLOAT
-                                    : DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-                          D2D1_ALPHA_MODE_PREMULTIPLIED));
+    const auto properties = D2D1::BitmapProperties(D2D1::PixelFormat(
+        halfFloat       ? DXGI_FORMAT_R16G16B16A16_FLOAT
+        : sourceProfile ? DXGI_FORMAT_B8G8R8A8_UNORM
+                        : DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+        D2D1_ALPHA_MODE_PREMULTIPLIED));
     const uint32_t bytesPerPixel = image.BytesPerPixel();
 
     // The gain map uploads as plain UNORM (it is not sRGB-encoded) and must
@@ -354,7 +387,6 @@ HRESULT ImageRenderer::UploadImage(const LoadedImage& image)
             m_gainBitmap.reset();
         }
         m_contentHeadroom = image.gainMap.headroom;
-        m_toSrgb = image.toSrgb.value_or(ColorMatrix3{1, 0, 0, 0, 1, 0, 0, 0, 1});
     }
 
     for (uint32_t y = 0; y < image.height; y += tileEdge)
@@ -389,15 +421,15 @@ HRESULT ImageRenderer::UploadImage(const LoadedImage& image)
                 ClearTiles();
                 return hr;
             }
-            if (m_gainBitmap)
+            if (const HRESULT effectHr = CreateTileEffects(tile, image, sourceProfile.get());
+                FAILED(effectHr))
             {
-                if (const HRESULT gainHr = CreateGainEffects(tile, image); FAILED(gainHr))
-                {
-                    // Show the SDR base rather than nothing.
-                    LOG_HR(gainHr);
-                    tile.gainTable.reset();
-                    tile.colorMatrix.reset();
-                }
+                // Show the bare pixels rather than nothing. Converted tiles
+                // are UNORM, so this is merely off-color, never broken.
+                LOG_HR(effectHr);
+                tile.output.reset();
+                tile.gainTable.reset();
+                tile.gainRescale.reset();
             }
             m_tiles.push_back(std::move(tile));
         }
@@ -406,13 +438,57 @@ HRESULT ImageRenderer::UploadImage(const LoadedImage& image)
     return S_OK;
 }
 
+// The tile's effect graph, if it needs one: color management from the
+// image's profile to scRGB, then the gain map on top of the linear result.
+HRESULT ImageRenderer::CreateTileEffects(ImageTile& tile, const LoadedImage& image,
+                                         ID2D1ColorContext* sourceProfile)
+{
+    wil::com_ptr<ID2D1Effect> color;
+    if (sourceProfile)
+    {
+        RETURN_IF_FAILED(m_d2dContext->CreateEffect(CLSID_D2D1ColorManagement, color.put()));
+        color->SetInput(0, tile.bitmap.get());
+        RETURN_IF_FAILED(
+            color->SetValue(D2D1_COLORMANAGEMENT_PROP_SOURCE_COLOR_CONTEXT, sourceProfile));
+        RETURN_IF_FAILED(color->SetValue(D2D1_COLORMANAGEMENT_PROP_DESTINATION_COLOR_CONTEXT,
+                                         m_scRgbContext.get()));
+        // Colorimetric: scRGB holds every color, so there is nothing to
+        // compress, and photos should keep their measured colors.
+        RETURN_IF_FAILED(color->SetValue(D2D1_COLORMANAGEMENT_PROP_SOURCE_RENDERING_INTENT,
+                                         D2D1_COLORMANAGEMENT_RENDERING_INTENT_RELATIVE_COLORIMETRIC));
+        RETURN_IF_FAILED(color->SetValue(D2D1_COLORMANAGEMENT_PROP_DESTINATION_RENDERING_INTENT,
+                                         D2D1_COLORMANAGEMENT_RENDERING_INTENT_RELATIVE_COLORIMETRIC));
+        RETURN_IF_FAILED(color->SetValue(D2D1_COLORMANAGEMENT_PROP_QUALITY, m_colorQuality));
+        if (m_colorQuality == D2D1_COLORMANAGEMENT_QUALITY_BEST)
+        {
+            RETURN_IF_FAILED(
+                color->SetValue(D2D1_PROPERTY_PRECISION, D2D1_BUFFER_PRECISION_32BPC_FLOAT));
+        }
+        tile.output = color;
+    }
+
+    if (m_gainBitmap)
+    {
+        ID2D1Image* base = tile.bitmap.get();
+        wil::com_ptr<ID2D1Image> converted;
+        if (color)
+        {
+            color->GetOutput(converted.put());
+            base = converted.get();
+        }
+        RETURN_IF_FAILED(CreateGainEffects(tile, image, base));
+    }
+    return S_OK;
+}
+
 // Per tile: the gain map, stretched over the whole image and shifted into
 // this tile's bitmap coordinates, goes through a lookup table (gain ->
 // boost / divisor), multiplies the linear base pixels, and a color matrix
-// multiplies the divisor back in while converting the base's primaries to
-// sRGB. The table and the matrix depend on the display and are filled in
-// by UpdateGainEffects. See DESIGN.md, "HDR gain map".
-HRESULT ImageRenderer::CreateGainEffects(ImageTile& tile, const LoadedImage& image)
+// multiplies the divisor back in. The table and the divisor depend on the
+// display and are filled in by UpdateGainEffects. See DESIGN.md, "HDR gain
+// map".
+HRESULT ImageRenderer::CreateGainEffects(ImageTile& tile, const LoadedImage& image,
+                                         ID2D1Image* base)
 {
     const D2D1_SIZE_U mapSize = m_gainBitmap->GetPixelSize();
 
@@ -439,13 +515,13 @@ HRESULT ImageRenderer::CreateGainEffects(ImageTile& tile, const LoadedImage& ima
     // premultiplied and the map is opaque, so alpha passes through intact.
     wil::com_ptr<ID2D1Effect> multiply;
     RETURN_IF_FAILED(m_d2dContext->CreateEffect(CLSID_D2D1ArithmeticComposite, multiply.put()));
-    multiply->SetInput(0, tile.bitmap.get());
+    multiply->SetInput(0, base);
     multiply->SetInputEffect(1, table.get());
     RETURN_IF_FAILED(multiply->SetValue(D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS,
                                         D2D1::Vector4F(1.0f, 0.0f, 0.0f, 0.0f)));
 
-    // Applied straight to the premultiplied values: the matrix is linear in
-    // RGB and leaves alpha alone, so premultiplication commutes with it.
+    // Applied straight to the premultiplied values: scaling RGB leaves alpha
+    // alone, so premultiplication commutes with it.
     wil::com_ptr<ID2D1Effect> matrix;
     RETURN_IF_FAILED(m_d2dContext->CreateEffect(CLSID_D2D1ColorMatrix, matrix.put()));
     matrix->SetInputEffect(0, multiply.get());
@@ -463,7 +539,8 @@ HRESULT ImageRenderer::CreateGainEffects(ImageTile& tile, const LoadedImage& ima
     }
 
     tile.gainTable = std::move(table);
-    tile.colorMatrix = std::move(matrix);
+    tile.gainRescale = matrix;
+    tile.output = std::move(matrix);
     return S_OK;
 }
 
@@ -477,15 +554,11 @@ void ImageRenderer::UpdateGainEffects()
     const float divisor = BuildAppleGainTable(
         m_contentHeadroom, GainMapWeight(m_displayHeadroom, m_contentHeadroom), table);
 
-    // D2D1_MATRIX_5X4_F multiplies a row vector (out = [r g b a 1] * M), so
-    // m_toSrgb, written for column vectors, goes in transposed.
-    const ColorMatrix3& m = m_toSrgb;
-    const D2D1_MATRIX_5X4_F color = D2D1::Matrix5x4F(
-        divisor * m[0], divisor * m[3], divisor * m[6], 0.0f,  //
-        divisor * m[1], divisor * m[4], divisor * m[7], 0.0f,  //
-        divisor * m[2], divisor * m[5], divisor * m[8], 0.0f,  //
-        0.0f, 0.0f, 0.0f, 1.0f,                                //
-        0.0f, 0.0f, 0.0f, 0.0f);
+    const D2D1_MATRIX_5X4_F rescale = D2D1::Matrix5x4F(divisor, 0.0f, 0.0f, 0.0f,  //
+                                                       0.0f, divisor, 0.0f, 0.0f,  //
+                                                       0.0f, 0.0f, divisor, 0.0f,  //
+                                                       0.0f, 0.0f, 0.0f, 1.0f,     //
+                                                       0.0f, 0.0f, 0.0f, 0.0f);
 
     const auto* bytes = reinterpret_cast<const BYTE*>(table.data());
     const auto size = static_cast<UINT32>(sizeof(table));
@@ -498,7 +571,7 @@ void ImageRenderer::UpdateGainEffects()
         (void)tile.gainTable->SetValue(D2D1_TABLETRANSFER_PROP_RED_TABLE, bytes, size);
         (void)tile.gainTable->SetValue(D2D1_TABLETRANSFER_PROP_GREEN_TABLE, bytes, size);
         (void)tile.gainTable->SetValue(D2D1_TABLETRANSFER_PROP_BLUE_TABLE, bytes, size);
-        (void)tile.colorMatrix->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, color);
+        (void)tile.gainRescale->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, rescale);
     }
 }
 
@@ -573,7 +646,7 @@ void ImageRenderer::DrawTiles(const ViewLayout& layout)
                         tile.source.top - tile.withGutter.top,
                         tile.source.right - tile.withGutter.left,
                         tile.source.bottom - tile.withGutter.top);
-        if (tile.colorMatrix)
+        if (tile.output)
         {
             // The effect output is in the tile bitmap's pixel coordinates;
             // map them onto the view the same way DrawBitmap does below.
@@ -581,7 +654,7 @@ void ImageRenderer::DrawTiles(const ViewLayout& layout)
                 D2D1::Matrix3x2F::Scale(layout.scale, layout.scale)
                 * D2D1::Matrix3x2F::Translation(layout.destX + tile.withGutter.left * layout.scale,
                                                 layout.destY + tile.withGutter.top * layout.scale));
-            m_d2dContext->DrawImage(tile.colorMatrix.get(), D2D1::Point2F(src.left, src.top), src,
+            m_d2dContext->DrawImage(tile.output.get(), D2D1::Point2F(src.left, src.top), src,
                                     D2D1_INTERPOLATION_MODE_LINEAR);
             m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
         }

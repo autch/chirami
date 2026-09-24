@@ -35,6 +35,7 @@ chirami is an image viewer targeting Windows 11 x64 and later. The name comes fr
 - 関連付けの登録はオプトイン（メニューから HKCU のみに書き込み、管理者権限不要。既定にするのは Windows の「既定のアプリ」設定から。解除メニューと解除用 .reg ファイルの自動生成で、いつでも元に戻せる） / Opt-in file association (written to HKCU only from the menu, no admin rights; making chirami the default happens in Windows "Default apps". An unregister menu and an auto-generated undo .reg file revert everything at any time)
 - 画像を開くたび・ズームのたびにウィンドウサイズが表示に追従（収まらなければスクロールバー） / The window tracks the displayed size on every open and zoom, with scrollbars once it can't
 - 背景色（余白・透過部分の下地）を表示メニューから変更可能（HDR ディスプレイでも他アプリと同じ見た目になるよう補正） / Configurable background color (View menu) for the margins and transparent areas, corrected to match other apps on HDR displays
+- 画像に埋め込まれたカラープロファイル（ICC）を適用して正しい色で表示（iPhone の Display P3 など。広色域は HDR / 自動色管理のディスプレイでそのまま再現。保存時はプロファイルを埋め込む） / Embedded color profiles (ICC) are applied for accurate color, e.g. the iPhone's Display P3; wide-gamut colors survive on HDR and auto-color-managed displays, and saving embeds the profile
 - JPEG / TIFF の EXIF の向き（Orientation）に従って正しい向きで表示（回転したことは画像のプロパティに表示） / JPEG and TIFF are shown upright per their EXIF Orientation (the properties window notes the rotation)
 - フルスクリーン表示 / Fullscreen mode
 - Per-Monitor V2 の DPI 対応（等倍表示は表示スケール設定に依らず dot-by-dot） / Per-Monitor V2 DPI awareness (actual size is true dot-by-dot regardless of display scaling)

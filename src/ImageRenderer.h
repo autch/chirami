@@ -71,15 +71,19 @@ private:
         D2D1_RECT_F withGutter{};  // image region the bitmap actually holds
         wil::com_ptr<ID2D1Bitmap> bitmap;
 
-        // Gain-map images only: bitmap * table(gain map) -> color matrix,
-        // drawn instead of the bare bitmap. See DESIGN.md, "HDR gain map".
-        wil::com_ptr<ID2D1Effect> gainTable;    // TableTransfer: gain -> boost
-        wil::com_ptr<ID2D1Effect> colorMatrix;  // rescale + base primaries to sRGB
+        // Drawn instead of the bare bitmap when set: the bitmap through
+        // color management (images with an ICC profile, see DESIGN.md,
+        // "Color profiles") and/or the gain map (see "HDR gain map").
+        wil::com_ptr<ID2D1Effect> output;
+        wil::com_ptr<ID2D1Effect> gainTable;    // TableTransfer: gain -> boost / divisor
+        wil::com_ptr<ID2D1Effect> gainRescale;  // ColorMatrix: times the divisor
     };
 
     float QuerySdrBoost() const;
     float QueryDisplayHeadroom() const;
-    HRESULT CreateGainEffects(ImageTile& tile, const LoadedImage& image);
+    HRESULT CreateTileEffects(ImageTile& tile, const LoadedImage& image,
+                              ID2D1ColorContext* sourceProfile);
+    HRESULT CreateGainEffects(ImageTile& tile, const LoadedImage& image, ID2D1Image* base);
     void UpdateGainEffects();
 
     HWND m_hwnd = nullptr;
@@ -99,7 +103,10 @@ private:
     // The uploaded image's gain map, shared by every tile's effect graph.
     wil::com_ptr<ID2D1Bitmap> m_gainBitmap;
     float m_contentHeadroom = 1.0f;
-    ColorMatrix3 m_toSrgb{1, 0, 0, 0, 1, 0, 0, 0, 1};
+
+    // Destination of color management: the swap chain's scRGB. Per device.
+    wil::com_ptr<ID2D1ColorContext> m_scRgbContext;
+    D2D1_COLORMANAGEMENT_QUALITY m_colorQuality = D2D1_COLORMANAGEMENT_QUALITY_NORMAL;
 
     // With HDR (advanced color) enabled, DWM boosts ordinary SDR windows to
     // the user's SDR white level but composes scRGB surfaces at 1.0 == 80

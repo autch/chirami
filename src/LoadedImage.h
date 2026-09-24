@@ -1,8 +1,7 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
-#include <optional>
+#include <string>
 #include <vector>
 #include <wincodec.h>
 
@@ -57,18 +56,32 @@ struct HdrGainMap
     explicit operator bool() const { return static_cast<bool>(map); }
 };
 
-// Row-major 3x3 matrix taking linear base-image RGB to linear sRGB (scRGB)
-// primaries.
-using ColorMatrix3 = std::array<float, 9>;
+// The ICC profile embedded in the file, and what the viewer does with it.
+// See DESIGN.md, "Color profiles".
+struct ColorProfile
+{
+    enum class Handling : uint8_t
+    {
+        None,         // no profile: the pixels are taken as sRGB
+        Converted,    // converted to scRGB when drawn
+        NotNeeded,    // sRGB in all but name; drawn as is
+        Unsupported,  // not applied (high-precision pixels, non-RGB profile)
+    };
+
+    // RGB profiles only: what the renderer converts from and the saver
+    // embeds. Empty for CMYK/gray profiles, which do not describe the RGB
+    // pixels WIC produced from them.
+    std::vector<uint8_t> icc;
+    std::wstring description;  // the profile's 'desc', for the properties window
+    Handling handling = Handling::None;
+};
 
 // What the loader hands to the UI: the pixels, plus an optional gain map.
 // Only the pixels are ever saved; the gain map is a display-time effect.
 struct LoadedImage : PixelBuffer
 {
     HdrGainMap gainMap;
-    // Set only for gain-map images, whose base is Display P3 rather than
-    // sRGB. Other images are drawn without gamut conversion as before.
-    std::optional<ColorMatrix3> toSrgb;
+    ColorProfile colorProfile;
     // The EXIF Orientation (2..8) the loader baked into the pixels, or 1 if
     // it turned nothing. Shown in the properties window.
     uint16_t appliedOrientation = 1;

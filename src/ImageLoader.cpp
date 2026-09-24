@@ -120,33 +120,76 @@ HRESULT DecodeToBgra8(IWICImagingFactory* factory, IWICBitmapSource* source, Pix
                                  out.pixels.data());
 }
 
-// The base image's primaries as a matrix to sRGB, when its ICC profile is a
-// simple one on the sRGB curve (Display P3 on iPhones).
-std::optional<ColorMatrix3> ReadToSrgbMatrix(IWICImagingFactory* factory,
-                                             IWICBitmapFrameDecode* frame)
+// The first ICC profile among the frame's color contexts (JPEG can list an
+// EXIF color space as well), or empty.
+std::vector<uint8_t> ReadWicIccProfile(IWICImagingFactory* factory, IWICBitmapFrameDecode* frame)
 {
-    wil::com_ptr<IWICColorContext> context;
-    if (FAILED(factory->CreateColorContext(context.put())))
-    {
-        return std::nullopt;
-    }
-    IWICColorContext* contexts[] = {context.get()};
     UINT count = 0;
-    WICColorContextType type{};
-    UINT size = 0;
-    if (FAILED(frame->GetColorContexts(1, contexts, &count)) || count == 0
-        || FAILED(context->GetType(&type)) || type != WICColorContextProfile
-        || FAILED(context->GetProfileBytes(0, nullptr, &size)) || size == 0)
+    if (FAILED(frame->GetColorContexts(0, nullptr, &count)) || count == 0)
     {
-        return std::nullopt;
+        return {};
     }
-    std::vector<uint8_t> profile(size);
-    if (FAILED(context->GetProfileBytes(size, profile.data(), &size)))
+    std::vector<wil::com_ptr<IWICColorContext>> contexts(count);
+    std::vector<IWICColorContext*> raw(count);
+    for (UINT i = 0; i < count; ++i)
     {
-        return std::nullopt;
+        if (FAILED(factory->CreateColorContext(contexts[i].put())))
+        {
+            return {};
+        }
+        raw[i] = contexts[i].get();
     }
-    profile.resize(size);
-    return SrgbCurveProfileToSrgbMatrix(profile);
+    if (FAILED(frame->GetColorContexts(count, raw.data(), &count)))
+    {
+        return {};
+    }
+    for (UINT i = 0; i < count; ++i)
+    {
+        WICColorContextType type{};
+        UINT size = 0;
+        if (FAILED(raw[i]->GetType(&type)) || type != WICColorContextProfile
+            || FAILED(raw[i]->GetProfileBytes(0, nullptr, &size)) || size == 0)
+        {
+            continue;
+        }
+        std::vector<uint8_t> profile(size);
+        if (SUCCEEDED(raw[i]->GetProfileBytes(size, profile.data(), &size)))
+        {
+            profile.resize(size);
+            return profile;
+        }
+    }
+    return {};
+}
+
+// Decides what to do with an embedded profile. Only 8-bit pixels are
+// converted for now; high-precision ones were already linearized as sRGB.
+// See DESIGN.md, "Color profiles".
+ColorProfile MakeColorProfile(std::vector<uint8_t> icc, PixelBuffer::Format format)
+{
+    ColorProfile profile;
+    if (icc.empty())
+    {
+        return profile;
+    }
+    profile.description = IccDescription(icc);
+    if (!IsRgbProfile(icc))
+    {
+        profile.handling = ColorProfile::Handling::Unsupported;
+        return profile;
+    }
+    if (IsSrgbEquivalent(icc))
+    {
+        profile.handling = ColorProfile::Handling::NotNeeded;
+    }
+    else
+    {
+        profile.handling = format == PixelBuffer::Format::Bgra8
+                               ? ColorProfile::Handling::Converted
+                               : ColorProfile::Handling::Unsupported;
+    }
+    profile.icc = std::move(icc);
+    return profile;
 }
 
 // Attaches Apple's HDR gain map (iPhone HEIC) when the codec exposes one
@@ -181,7 +224,6 @@ try
     THROW_IF_FAILED(DecodeToBgra8(factory, gainFrame.get(), gainMap.map));
     gainMap.headroom = headroom;
     out.gainMap = std::move(gainMap);
-    out.toSrgb = ReadToSrgbMatrix(factory, frame);
 }
 CATCH_LOG()
 
@@ -359,12 +401,15 @@ try
     // rotation, and applying EXIF on top would turn the image twice.
     const bool isJpeg = TurboJpeg::LooksLikeJpeg(data.data(), data.size());
     const uint16_t jpegOrientation = isJpeg ? ReadJpegExifOrientation(data) : 1;
+    // Likewise JPEG's ICC profile, so both decoders see the same one.
+    std::vector<uint8_t> jpegIcc = isJpeg ? ReadJpegIccProfile(data) : std::vector<uint8_t>{};
 
     // JPEG goes through the optional libjpeg-turbo codec when its DLL is
     // present; any failure there (CMYK, corrupt stream) falls back to WIC.
     if (isJpeg && TurboJpeg::IsAvailable()
         && SUCCEEDED(TurboJpeg::Decode(data.data(), data.size(), out)))
     {
+        out.colorProfile = MakeColorProfile(std::move(jpegIcc), out.format);
         ApplyOrientation(out, jpegOrientation);
         return S_OK;
     }
@@ -438,6 +483,9 @@ try
     {
         TryAttachGainMap(factory, frame.get(), out);
     }
+
+    out.colorProfile = MakeColorProfile(
+        isJpeg ? std::move(jpegIcc) : ReadWicIccProfile(factory, frame.get()), out.format);
 
     GUID container{};
     (void)decoder->GetContainerFormat(&container);
